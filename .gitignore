@@ -216,3 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# >>> bloco gerenciado pela sincronização — não editar entre os marcadores
+# Saídas do pipeline, regeneradas localmente (os notebooks versionados são a exceção)
+reports/
+# Dados (~70 GiB), checkpoints e coletas, mesmo com --data-root dentro do clone
+dados_geoespaciais/
+*.h5
+*.pt
+*.pth
+*.npz
+# Repositórios de terceiros fixados no README e ambiente
+.stconvs2s/
+.wildfirespreadts/
+.venv/
+__pycache__/
+# <<< bloco gerenciado pela sincronização

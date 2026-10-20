@@ -1,0 +1,20 @@
+# Dependências diretas da frente WildfireSpreadTS, Python 3.12. O PyTorch fica fora daqui porque o índice depende
+# da máquina: instale depois um de `requirements-cuda.txt` (GPU) ou `requirements-cpu.txt`.
+# Versões completas e transitivas, para todas as plataformas: `requirements-lock.txt`.
+numpy==2.2.6
+scipy==1.15.3
+pandas==2.3.3
+h5py==3.16.0
+rasterio==1.4.3
+pyproj==3.7.1
+matplotlib==3.10.7
+cartopy==0.25.0
+requests==2.32.5
+psutil==7.1.0
+# notebooks: os builders executam o notebook gerado com nbclient
+nbformat==5.10.4
+nbclient==0.10.2
+ipykernel==6.30.1
+ipython==8.37.0
+# testes: referência da AP calculada em streaming
+scikit-learn==1.6.1

@@ -1,0 +1,1445 @@
+{
+  "all_years": [
+    2018,
+    2019,
+    2020,
+    2021
+  ],
+  "assignment": {
+    "future_only": [
+      "2021/fire_24935867",
+      "2021/fire_24935874",
+      "2021/fire_24935885",
+      "2021/fire_24936357",
+      "2021/fire_25017416",
+      "2021/fire_25084892",
+      "2021/fire_25138926",
+      "2021/fire_25138935",
+      "2021/fire_25138942",
+      "2021/fire_25138947",
+      "2021/fire_25204812",
+      "2021/fire_25204815",
+      "2021/fire_25204820",
+      "2021/fire_25204848",
+      "2021/fire_25204858",
+      "2021/fire_25204859",
+      "2021/fire_25204868",
+      "2021/fire_25204869",
+      "2021/fire_25204877",
+      "2021/fire_25204897",
+      "2021/fire_25204900",
+      "2021/fire_25205295",
+      "2021/fire_25205306",
+      "2021/fire_25205312",
+      "2021/fire_25205336",
+      "2021/fire_25205362",
+      "2021/fire_25205387",
+      "2021/fire_25205462",
+      "2021/fire_25294687",
+      "2021/fire_25294691",
+      "2021/fire_25294692",
+      "2021/fire_25294706",
+      "2021/fire_25294714",
+      "2021/fire_25294735",
+      "2021/fire_25294746",
+      "2021/fire_25294754",
+      "2021/fire_25294757",
+      "2021/fire_25295089",
+      "2021/fire_25295099",
+      "2021/fire_25295127",
+      "2021/fire_25295966",
+      "2021/fire_25410438",
+      "2021/fire_25410444",
+      "2021/fire_25410445",
+      "2021/fire_25410483",
+      "2021/fire_25410659",
+      "2021/fire_25410700",
+      "2021/fire_25410727",
+      "2021/fire_25410735",
+      "2021/fire_25410746",
+      "2021/fire_25411093",
+      "2021/fire_25411102",
+      "2021/fire_25411134",
+      "2021/fire_25411925",
+      "2021/fire_25547912",
+      "2021/fire_25547988",
+      "2021/fire_25548047",
+      "2021/fire_25548063",
+      "2021/fire_25548074",
+      "2021/fire_25548446",
+      "2021/fire_25548700",
+      "2021/fire_25639187"
+    ],
+    "space_only": [
+      "2019/fire_23036860",
+      "2019/fire_23036871",
+      "2019/fire_23037423",
+      "2019/fire_23037424",
+      "2019/fire_23037431",
+      "2019/fire_23159787",
+      "2019/fire_23159836",
+      "2019/fire_23159838",
+      "2019/fire_23159841",
+      "2019/fire_23159842",
+      "2019/fire_23159847",
+      "2019/fire_23159853",
+      "2019/fire_23159855",
+      "2019/fire_23159860",
+      "2019/fire_23159862",
+      "2019/fire_23160488",
+      "2019/fire_23301386",
+      "2019/fire_23301395",
+      "2019/fire_23493978",
+      "2019/fire_23493983",
+      "2019/fire_23493986",
+      "2020/fire_24027566",
+      "2020/fire_24027570",
+      "2020/fire_24104628",
+      "2020/fire_24104631",
+      "2020/fire_24104857",
+      "2020/fire_24191728",
+      "2020/fire_24191741",
+      "2020/fire_24191743",
+      "2020/fire_24191943",
+      "2020/fire_24191979",
+      "2020/fire_24332925",
+      "2020/fire_24332969",
+      "2020/fire_24332989",
+      "2020/fire_24332991",
+      "2020/fire_24333259",
+      "2020/fire_24333267",
+      "2020/fire_24333270",
+      "2020/fire_24333277",
+      "2020/fire_24333279",
+      "2020/fire_24333285",
+      "2020/fire_24333287",
+      "2020/fire_24462604",
+      "2020/fire_24462788",
+      "2020/fire_24462912",
+      "2020/fire_24463187",
+      "2020/fire_24463190",
+      "2020/fire_24463206",
+      "2020/fire_24463211",
+      "2020/fire_24604676",
+      "2020/fire_24604777"
+    ],
+    "test": [
+      "2021/fire_25086458",
+      "2021/fire_25086466",
+      "2021/fire_25088018",
+      "2021/fire_25088019",
+      "2021/fire_25205354",
+      "2021/fire_25205788",
+      "2021/fire_25205814",
+      "2021/fire_25205827",
+      "2021/fire_25205936",
+      "2021/fire_25205954",
+      "2021/fire_25205956",
+      "2021/fire_25295026",
+      "2021/fire_25295057",
+      "2021/fire_25295804",
+      "2021/fire_25295856",
+      "2021/fire_25295857",
+      "2021/fire_25295869",
+      "2021/fire_25295877",
+      "2021/fire_25295902",
+      "2021/fire_25295908",
+      "2021/fire_25295909",
+      "2021/fire_25295923",
+      "2021/fire_25295927",
+      "2021/fire_25295931",
+      "2021/fire_25295934",
+      "2021/fire_25295937",
+      "2021/fire_25295938",
+      "2021/fire_25295941",
+      "2021/fire_25295951",
+      "2021/fire_25295956",
+      "2021/fire_25410985",
+      "2021/fire_25411006",
+      "2021/fire_25411013",
+      "2021/fire_25411825",
+      "2021/fire_25411889",
+      "2021/fire_25411893",
+      "2021/fire_25411896",
+      "2021/fire_25411897",
+      "2021/fire_25411905",
+      "2021/fire_25411910",
+      "2021/fire_25411915",
+      "2021/fire_25548269",
+      "2021/fire_25548658",
+      "2021/fire_25548678",
+      "2021/fire_25639315",
+      "2021/fire_25639646"
+    ],
+    "train": [
+      "2019/fire_22710141",
+      "2019/fire_22863125",
+      "2019/fire_22863172",
+      "2019/fire_22938746",
+      "2019/fire_22938749",
+      "2019/fire_22939600",
+      "2019/fire_23036522",
+      "2019/fire_23036523",
+      "2019/fire_23036542",
+      "2019/fire_23036559",
+      "2019/fire_23036564",
+      "2019/fire_23036565",
+      "2019/fire_23036575",
+      "2019/fire_23159633",
+      "2019/fire_23159637",
+      "2019/fire_23159642",
+      "2019/fire_23159647",
+      "2019/fire_23159657",
+      "2019/fire_23160511",
+      "2019/fire_23300665",
+      "2019/fire_23300668",
+      "2019/fire_23300669",
+      "2019/fire_23300689",
+      "2019/fire_23300699",
+      "2019/fire_23300712",
+      "2019/fire_23300741",
+      "2019/fire_23300744",
+      "2019/fire_23301037",
+      "2019/fire_23301101",
+      "2019/fire_23410594",
+      "2019/fire_23410601",
+      "2019/fire_23410607",
+      "2019/fire_23410616",
+      "2019/fire_23410617",
+      "2019/fire_23410619",
+      "2020/fire_23654679",
+      "2020/fire_23756984",
+      "2020/fire_23757491",
+      "2020/fire_23757522",
+      "2020/fire_23947000",
+      "2020/fire_24025599",
+      "2020/fire_24025601",
+      "2020/fire_24025605",
+      "2020/fire_24025610",
+      "2020/fire_24103545",
+      "2020/fire_24103557",
+      "2020/fire_24103560",
+      "2020/fire_24103561",
+      "2020/fire_24103571",
+      "2020/fire_24103572",
+      "2020/fire_24103581",
+      "2020/fire_24103582",
+      "2020/fire_24103584",
+      "2020/fire_24103590",
+      "2020/fire_24104640",
+      "2020/fire_24104654",
+      "2020/fire_24104658",
+      "2020/fire_24104674",
+      "2020/fire_24191347",
+      "2020/fire_24191357",
+      "2020/fire_24191360",
+      "2020/fire_24191363",
+      "2020/fire_24191364",
+      "2020/fire_24191372",
+      "2020/fire_24191373",
+      "2020/fire_24191375",
+      "2020/fire_24191376",
+      "2020/fire_24191377",
+      "2020/fire_24191384",
+      "2020/fire_24191389",
+      "2020/fire_24191393",
+      "2020/fire_24191395",
+      "2020/fire_24191402",
+      "2020/fire_24191411",
+      "2020/fire_24191418",
+      "2020/fire_24191419",
+      "2020/fire_24191423",
+      "2020/fire_24191427",
+      "2020/fire_24191760",
+      "2020/fire_24332591",
+      "2020/fire_24332592",
+      "2020/fire_24332600",
+      "2020/fire_24332608",
+      "2020/fire_24332619",
+      "2020/fire_24332622",
+      "2020/fire_24332628",
+      "2020/fire_24332647",
+      "2020/fire_24332676",
+      "2020/fire_24332700",
+      "2020/fire_24332702",
+      "2020/fire_24332704",
+      "2020/fire_24332728",
+      "2020/fire_24332731",
+      "2020/fire_24332732",
+      "2020/fire_24332746",
+      "2020/fire_24332760",
+      "2020/fire_24332761",
+      "2020/fire_24332763",
+      "2020/fire_24332764",
+      "2020/fire_24332768",
+      "2020/fire_24332776",
+      "2020/fire_24332779",
+      "2020/fire_24332783",
+      "2020/fire_24332784",
+      "2020/fire_24332785",
+      "2020/fire_24332787",
+      "2020/fire_24332791",
+      "2020/fire_24332793",
+      "2020/fire_24332796",
+      "2020/fire_24332798",
+      "2020/fire_24332800",
+      "2020/fire_24332801",
+      "2020/fire_24332803",
+      "2020/fire_24332808",
+      "2020/fire_24332815",
+      "2020/fire_24333006",
+      "2020/fire_24333012",
+      "2020/fire_24333026",
+      "2020/fire_24333033",
+      "2020/fire_24333039",
+      "2020/fire_24333293",
+      "2020/fire_24461320",
+      "2020/fire_24461328",
+      "2020/fire_24461347",
+      "2020/fire_24461421",
+      "2020/fire_24461607",
+      "2020/fire_24461618",
+      "2020/fire_24461623",
+      "2020/fire_24461771",
+      "2020/fire_24461780",
+      "2020/fire_24461785",
+      "2020/fire_24461789",
+      "2020/fire_24462691",
+      "2020/fire_24462753",
+      "2020/fire_24462764",
+      "2020/fire_24462819",
+      "2020/fire_24462847",
+      "2020/fire_24462867",
+      "2020/fire_24462882",
+      "2020/fire_24463227",
+      "2020/fire_24604426",
+      "2020/fire_24604435",
+      "2020/fire_24604456",
+      "2020/fire_24604462",
+      "2020/fire_24604463",
+      "2020/fire_24604731",
+      "2020/fire_24604754",
+      "2020/fire_24604783",
+      "2020/fire_24604832",
+      "2020/fire_24604848",
+      "2020/fire_24695413",
+      "2020/fire_24695430",
+      "2020/fire_24695442",
+      "2020/fire_24695447",
+      "2020/fire_24695497",
+      "2020/fire_24695532",
+      "2020/fire_24695557",
+      "2020/fire_24695566",
+      "2020/fire_24695584",
+      "2020/fire_24695627"
+    ],
+    "validation": [
+      "2018/fire_21804877",
+      "2018/fire_21804883",
+      "2018/fire_21889943",
+      "2018/fire_21889947",
+      "2018/fire_21889953",
+      "2018/fire_21889957",
+      "2018/fire_21889986",
+      "2018/fire_21889990",
+      "2018/fire_21889992",
+      "2018/fire_21889994",
+      "2018/fire_21889995",
+      "2018/fire_21890524",
+      "2018/fire_21998023",
+      "2018/fire_21998081",
+      "2018/fire_21998095",
+      "2018/fire_21998100",
+      "2018/fire_21999251",
+      "2018/fire_21999260",
+      "2018/fire_21999273",
+      "2018/fire_21999321",
+      "2018/fire_22141327",
+      "2018/fire_22141343",
+      "2018/fire_22141426",
+      "2018/fire_22141445"
+    ]
+  },
+  "blocks": {
+    "blocks_per_split": {
+      "test": 3,
+      "train": 6,
+      "validation": 2
+    },
+    "n_blocks": 11,
+    "split_by_block": {
+      "0_0": "train",
+      "0_1": "train",
+      "0_2": "validation",
+      "1_0": "train",
+      "1_1": "test",
+      "1_2": "test",
+      "2_0": "train",
+      "2_1": "train",
+      "2_2": "test",
+      "3_0": "train",
+      "3_1": "validation"
+    },
+    "windows_by_block": {
+      "0_0": 1288,
+      "0_1": 2298,
+      "0_2": 1801,
+      "1_0": 882,
+      "1_1": 901,
+      "1_2": 1469,
+      "2_0": 675,
+      "2_1": 900,
+      "2_2": 304,
+      "3_0": 32,
+      "3_1": 22
+    }
+  },
+  "cells": {
+    "future_only": {
+      "blocks": "train",
+      "events": 62,
+      "windows": 1407,
+      "years": [
+        2021
+      ]
+    },
+    "space_only": {
+      "blocks": "test",
+      "events": 51,
+      "windows": 612,
+      "years": [
+        2019,
+        2020
+      ]
+    },
+    "test": {
+      "blocks": "test",
+      "events": 46,
+      "windows": 869,
+      "years": [
+        2021
+      ]
+    },
+    "train": {
+      "blocks": "train",
+      "events": 160,
+      "windows": 2698,
+      "years": [
+        2019,
+        2020
+      ]
+    },
+    "validation": {
+      "blocks": "validation",
+      "events": 24,
+      "windows": 378,
+      "years": [
+        2018
+      ]
+    }
+  },
+  "dropped": [
+    "2018/fire_21459234",
+    "2018/fire_21459239",
+    "2018/fire_21459242",
+    "2018/fire_21615465",
+    "2018/fire_21615469",
+    "2018/fire_21751305",
+    "2018/fire_21804884",
+    "2018/fire_21804975",
+    "2018/fire_21804980",
+    "2018/fire_21889997",
+    "2018/fire_21890007",
+    "2018/fire_21890009",
+    "2018/fire_21890010",
+    "2018/fire_21890019",
+    "2018/fire_21890058",
+    "2018/fire_21890063",
+    "2018/fire_21890065",
+    "2018/fire_21890072",
+    "2018/fire_21890078",
+    "2018/fire_21890091",
+    "2018/fire_21890100",
+    "2018/fire_21890115",
+    "2018/fire_21890143",
+    "2018/fire_21890515",
+    "2018/fire_21998097",
+    "2018/fire_21998119",
+    "2018/fire_21998143",
+    "2018/fire_21998157",
+    "2018/fire_21998264",
+    "2018/fire_21998287",
+    "2018/fire_21998291",
+    "2018/fire_21999299",
+    "2018/fire_22141356",
+    "2018/fire_22141461",
+    "2018/fire_22141566",
+    "2018/fire_22141571",
+    "2018/fire_22258087",
+    "2018/fire_22258318",
+    "2019/fire_23036877",
+    "2019/fire_23159789",
+    "2019/fire_23159792",
+    "2019/fire_23159821",
+    "2019/fire_23300839",
+    "2019/fire_23300861",
+    "2019/fire_23300886",
+    "2019/fire_23301046",
+    "2019/fire_23301095",
+    "2019/fire_23301106",
+    "2019/fire_23493973",
+    "2019/fire_23572745",
+    "2020/fire_24027580",
+    "2020/fire_24104636",
+    "2020/fire_24104639",
+    "2020/fire_24104644",
+    "2020/fire_24191756",
+    "2020/fire_24332922",
+    "2020/fire_24332923",
+    "2020/fire_24332933",
+    "2020/fire_24332934",
+    "2020/fire_24332939",
+    "2020/fire_24332949",
+    "2020/fire_24332954",
+    "2020/fire_24332956",
+    "2020/fire_24332995",
+    "2020/fire_24333000",
+    "2020/fire_24462127",
+    "2020/fire_24462233",
+    "2020/fire_24462263",
+    "2020/fire_24462335",
+    "2020/fire_24462488",
+    "2020/fire_24462610",
+    "2020/fire_24695756",
+    "2020/fire_24695758",
+    "2020/fire_24695963",
+    "2020/fire_24695970",
+    "2021/fire_25017306",
+    "2021/fire_25017323",
+    "2021/fire_25017384",
+    "2021/fire_25204835",
+    "2021/fire_25205247",
+    "2021/fire_25205259",
+    "2021/fire_25205260",
+    "2021/fire_25205363",
+    "2021/fire_25294989",
+    "2021/fire_25294991",
+    "2021/fire_25294998",
+    "2021/fire_25295031",
+    "2021/fire_25295073",
+    "2021/fire_25295081",
+    "2021/fire_25295816",
+    "2021/fire_25295837",
+    "2021/fire_25295852",
+    "2021/fire_25295855",
+    "2021/fire_25295862",
+    "2021/fire_25410883",
+    "2021/fire_25410907",
+    "2021/fire_25410960",
+    "2021/fire_25410972",
+    "2021/fire_25410996",
+    "2021/fire_25411029",
+    "2021/fire_25411057"
+  ],
+  "evaluation_cells": [
+    "test",
+    "future_only",
+    "space_only"
+  ],
+  "fold": 6,
+  "fold_choice": {
+    "chosen": 6,
+    "criterion": "entre os folds que passam os gates, manter 2021 como ano de teste (o mesmo do fold 2 temporal, para que a comparação entre protocolos isole a restrição espacial) e, entre esses, o de maior volume de treino. Só contagem de eventos, data e pegada entram no critério — nenhum rótulo.",
+    "folds": {
+      "0": {
+        "cells": {
+          "future_only": {
+            "events": 62,
+            "windows": 1407
+          },
+          "space_only": {
+            "events": 56,
+            "windows": 778
+          },
+          "test": {
+            "events": 46,
+            "windows": 869
+          },
+          "train": {
+            "events": 114,
+            "windows": 2026
+          },
+          "validation": {
+            "events": 21,
+            "windows": 270
+          }
+        },
+        "passes_gates": false,
+        "years": {
+          "test": [
+            2021
+          ],
+          "train": [
+            2018,
+            2019
+          ],
+          "validation": [
+            2020
+          ]
+        }
+      },
+      "1": {
+        "cells": {
+          "future_only": {
+            "events": 125,
+            "windows": 2161
+          },
+          "space_only": {
+            "events": 56,
+            "windows": 778
+          },
+          "test": {
+            "events": 30,
+            "windows": 356
+          },
+          "train": {
+            "events": 114,
+            "windows": 2026
+          },
+          "validation": {
+            "events": 22,
+            "windows": 489
+          }
+        },
+        "passes_gates": true,
+        "years": {
+          "test": [
+            2020
+          ],
+          "train": [
+            2018,
+            2019
+          ],
+          "validation": [
+            2021
+          ]
+        }
+      },
+      "10": {
+        "cells": {
+          "future_only": {
+            "events": 35,
+            "windows": 537
+          },
+          "space_only": {
+            "events": 76,
+            "windows": 1225
+          },
+          "test": {
+            "events": 21,
+            "windows": 256
+          },
+          "train": {
+            "events": 187,
+            "windows": 3568
+          },
+          "validation": {
+            "events": 24,
+            "windows": 378
+          }
+        },
+        "passes_gates": false,
+        "years": {
+          "test": [
+            2019
+          ],
+          "train": [
+            2020,
+            2021
+          ],
+          "validation": [
+            2018
+          ]
+        }
+      },
+      "11": {
+        "cells": {
+          "future_only": {
+            "events": 79,
+            "windows": 1489
+          },
+          "space_only": {
+            "events": 76,
+            "windows": 1225
+          },
+          "test": {
+            "events": 35,
+            "windows": 522
+          },
+          "train": {
+            "events": 187,
+            "windows": 3568
+          },
+          "validation": {
+            "events": 6,
+            "windows": 74
+          }
+        },
+        "passes_gates": false,
+        "years": {
+          "test": [
+            2018
+          ],
+          "train": [
+            2020,
+            2021
+          ],
+          "validation": [
+            2019
+          ]
+        }
+      },
+      "2": {
+        "cells": {
+          "future_only": {
+            "events": 62,
+            "windows": 1407
+          },
+          "space_only": {
+            "events": 65,
+            "windows": 878
+          },
+          "test": {
+            "events": 46,
+            "windows": 869
+          },
+          "train": {
+            "events": 204,
+            "windows": 3650
+          },
+          "validation": {
+            "events": 6,
+            "windows": 74
+          }
+        },
+        "passes_gates": false,
+        "years": {
+          "test": [
+            2021
+          ],
+          "train": [
+            2018,
+            2020
+          ],
+          "validation": [
+            2019
+          ]
+        }
+      },
+      "3": {
+        "cells": {
+          "future_only": {
+            "events": 35,
+            "windows": 537
+          },
+          "space_only": {
+            "events": 65,
+            "windows": 878
+          },
+          "test": {
+            "events": 21,
+            "windows": 256
+          },
+          "train": {
+            "events": 204,
+            "windows": 3650
+          },
+          "validation": {
+            "events": 22,
+            "windows": 489
+          }
+        },
+        "passes_gates": false,
+        "years": {
+          "test": [
+            2019
+          ],
+          "train": [
+            2018,
+            2020
+          ],
+          "validation": [
+            2021
+          ]
+        }
+      },
+      "4": {
+        "cells": {
+          "future_only": {
+            "events": 125,
+            "windows": 2161
+          },
+          "space_only": {
+            "events": 81,
+            "windows": 1391
+          },
+          "test": {
+            "events": 30,
+            "windows": 356
+          },
+          "train": {
+            "events": 141,
+            "windows": 2896
+          },
+          "validation": {
+            "events": 6,
+            "windows": 74
+          }
+        },
+        "passes_gates": false,
+        "years": {
+          "test": [
+            2020
+          ],
+          "train": [
+            2018,
+            2021
+          ],
+          "validation": [
+            2019
+          ]
+        }
+      },
+      "5": {
+        "cells": {
+          "future_only": {
+            "events": 35,
+            "windows": 537
+          },
+          "space_only": {
+            "events": 81,
+            "windows": 1391
+          },
+          "test": {
+            "events": 21,
+            "windows": 256
+          },
+          "train": {
+            "events": 141,
+            "windows": 2896
+          },
+          "validation": {
+            "events": 21,
+            "windows": 270
+          }
+        },
+        "passes_gates": false,
+        "years": {
+          "test": [
+            2019
+          ],
+          "train": [
+            2018,
+            2021
+          ],
+          "validation": [
+            2020
+          ]
+        }
+      },
+      "6": {
+        "cells": {
+          "future_only": {
+            "events": 62,
+            "windows": 1407
+          },
+          "space_only": {
+            "events": 51,
+            "windows": 612
+          },
+          "test": {
+            "events": 46,
+            "windows": 869
+          },
+          "train": {
+            "events": 160,
+            "windows": 2698
+          },
+          "validation": {
+            "events": 24,
+            "windows": 378
+          }
+        },
+        "passes_gates": true,
+        "years": {
+          "test": [
+            2021
+          ],
+          "train": [
+            2019,
+            2020
+          ],
+          "validation": [
+            2018
+          ]
+        }
+      },
+      "7": {
+        "cells": {
+          "future_only": {
+            "events": 79,
+            "windows": 1489
+          },
+          "space_only": {
+            "events": 51,
+            "windows": 612
+          },
+          "test": {
+            "events": 35,
+            "windows": 522
+          },
+          "train": {
+            "events": 160,
+            "windows": 2698
+          },
+          "validation": {
+            "events": 22,
+            "windows": 489
+          }
+        },
+        "passes_gates": true,
+        "years": {
+          "test": [
+            2018
+          ],
+          "train": [
+            2019,
+            2020
+          ],
+          "validation": [
+            2021
+          ]
+        }
+      },
+      "8": {
+        "cells": {
+          "future_only": {
+            "events": 125,
+            "windows": 2161
+          },
+          "space_only": {
+            "events": 67,
+            "windows": 1125
+          },
+          "test": {
+            "events": 30,
+            "windows": 356
+          },
+          "train": {
+            "events": 97,
+            "windows": 1944
+          },
+          "validation": {
+            "events": 24,
+            "windows": 378
+          }
+        },
+        "passes_gates": true,
+        "years": {
+          "test": [
+            2020
+          ],
+          "train": [
+            2019,
+            2021
+          ],
+          "validation": [
+            2018
+          ]
+        }
+      },
+      "9": {
+        "cells": {
+          "future_only": {
+            "events": 79,
+            "windows": 1489
+          },
+          "space_only": {
+            "events": 67,
+            "windows": 1125
+          },
+          "test": {
+            "events": 35,
+            "windows": 522
+          },
+          "train": {
+            "events": 97,
+            "windows": 1944
+          },
+          "validation": {
+            "events": 21,
+            "windows": 270
+          }
+        },
+        "passes_gates": false,
+        "years": {
+          "test": [
+            2018
+          ],
+          "train": [
+            2019,
+            2021
+          ],
+          "validation": [
+            2020
+          ]
+        }
+      }
+    },
+    "gates": {
+      "test": {
+        "events": 20,
+        "windows": 300
+      },
+      "validation": {
+        "events": 10,
+        "windows": 300
+      }
+    },
+    "note": "A partição de blocos é a mesma em todos os folds, então esta tabela varia apenas o tempo. Uma validação cruzada que também rotacionasse os blocos é extensão; não está implementada.",
+    "viable_folds": [
+      1,
+      6,
+      7,
+      8
+    ],
+    "viable_with_test_year_2021": [
+      6
+    ]
+  },
+  "generated_at_utc": "2026-10-02T01:24:02+00:00",
+  "grid": {
+    "test": {
+      "test": {
+        "events": 46,
+        "windows": 869
+      },
+      "train": {
+        "events": 51,
+        "windows": 612
+      },
+      "validation": {
+        "events": 35,
+        "windows": 522
+      }
+    },
+    "train": {
+      "test": {
+        "events": 62,
+        "windows": 1407
+      },
+      "train": {
+        "events": 160,
+        "windows": 2698
+      },
+      "validation": {
+        "events": 79,
+        "windows": 1489
+      }
+    },
+    "validation": {
+      "test": {
+        "events": 22,
+        "windows": 489
+      },
+      "train": {
+        "events": 27,
+        "windows": 344
+      },
+      "validation": {
+        "events": 24,
+        "windows": 378
+      }
+    }
+  },
+  "isolates": "espaço e tempo ao mesmo tempo (bloco × ano)",
+  "kind": "spatiotemporal",
+  "n_dropped_events": 101,
+  "n_events": {
+    "future_only": 62,
+    "space_only": 51,
+    "test": 46,
+    "train": 160,
+    "validation": 24
+  },
+  "note": "O teste é lugar novo e período novo ao mesmo tempo; `future_only` (blocos de treino, ano de teste) e `space_only` (blocos de teste, anos de treino) decompõem a perda, avaliados com o mesmo modelo. As células seladas não entram em treino, seleção nem relatório de desempenho.",
+  "parameters": {
+    "block_m": 600000.0,
+    "buffer_m": 10000.0,
+    "fold": 6,
+    "min_blocks": 2,
+    "shares": {
+      "test": 0.25,
+      "train": 0.6,
+      "validation": 0.15
+    },
+    "t_in": 5
+  },
+  "provenance": {
+    "input_sha256": {},
+    "python": "3.12.14",
+    "repo": {
+      "dirty": true,
+      "note": "commit do repositório de trabalho em que a definição foi gerada",
+      "source_commit": "2c9c36e5dccd861c4a0965d9c28a3a9b2703b2c2",
+      "source_sha256": "f4d4938cf0e807a39fbc43834e51f81780a74dccfb663f4cc3210df9b744739e"
+    },
+    "stconvs2s": {
+      "branch": "noemi",
+      "commit": "c355e9e023a84625f8e31afd386e47fea98708d6",
+      "dirty": false,
+      "remote": "https://github.com/noemicho/stconvs2s"
+    },
+    "torch": {
+      "cuda_available": true,
+      "cuda_build": "12.6",
+      "cudnn": 91002,
+      "device_name": "NVIDIA GeForce RTX 4050 Laptop GPU",
+      "device_total_memory_gib": 5.997,
+      "nvidia_driver": "577.13",
+      "version": "2.13.0+cu126"
+    }
+  },
+  "rationale": "Nem o split por ano nem o por bloco medem o que a aplicação enfrenta. O temporal repete regiões (96,2% dos eventos de teste sobre pegada de treino); o espacial repete anos, então o modelo já viu a estação de fogo do ano em que é avaliado. Aqui as duas separações são cruzadas: o teste é lugar novo e período novo ao mesmo tempo. É a leitura mais conservadora e a que reflete a incerteza real.",
+  "sealed_cells": {
+    "test_blocks_x_validation_years": [
+      "2018/fire_21693353",
+      "2018/fire_21804893",
+      "2018/fire_21804942",
+      "2018/fire_21890003",
+      "2018/fire_21890013",
+      "2018/fire_21890024",
+      "2018/fire_21890033",
+      "2018/fire_21890054",
+      "2018/fire_21890056",
+      "2018/fire_21890069",
+      "2018/fire_21890087",
+      "2018/fire_21890098",
+      "2018/fire_21890101",
+      "2018/fire_21890103",
+      "2018/fire_21890106",
+      "2018/fire_21890643",
+      "2018/fire_21998103",
+      "2018/fire_21998152",
+      "2018/fire_21998187",
+      "2018/fire_21998227",
+      "2018/fire_21998255",
+      "2018/fire_21998263",
+      "2018/fire_21998265",
+      "2018/fire_21998299",
+      "2018/fire_21998313",
+      "2018/fire_21999270",
+      "2018/fire_21999351",
+      "2018/fire_21999354",
+      "2018/fire_22141465",
+      "2018/fire_22141509",
+      "2018/fire_22141528",
+      "2018/fire_22141554",
+      "2018/fire_22141572",
+      "2018/fire_22141577",
+      "2018/fire_22141596"
+    ],
+    "train_blocks_x_validation_years": [
+      "2018/fire_21458798",
+      "2018/fire_21458801",
+      "2018/fire_21458806",
+      "2018/fire_21458836",
+      "2018/fire_21458848",
+      "2018/fire_21459249",
+      "2018/fire_21459253",
+      "2018/fire_21538827",
+      "2018/fire_21617464",
+      "2018/fire_21688910",
+      "2018/fire_21688916",
+      "2018/fire_21690064",
+      "2018/fire_21690071",
+      "2018/fire_21690073",
+      "2018/fire_21690102",
+      "2018/fire_21748766",
+      "2018/fire_21748783",
+      "2018/fire_21748798",
+      "2018/fire_21748801",
+      "2018/fire_21748813",
+      "2018/fire_21751303",
+      "2018/fire_21751315",
+      "2018/fire_21804572",
+      "2018/fire_21804577",
+      "2018/fire_21804582",
+      "2018/fire_21804588",
+      "2018/fire_21804589",
+      "2018/fire_21804590",
+      "2018/fire_21804895",
+      "2018/fire_21804899",
+      "2018/fire_21804961",
+      "2018/fire_21804985",
+      "2018/fire_21805022",
+      "2018/fire_21889672",
+      "2018/fire_21889679",
+      "2018/fire_21889682",
+      "2018/fire_21889683",
+      "2018/fire_21889697",
+      "2018/fire_21889717",
+      "2018/fire_21889719",
+      "2018/fire_21889734",
+      "2018/fire_21889744",
+      "2018/fire_21889750",
+      "2018/fire_21889754",
+      "2018/fire_21889763",
+      "2018/fire_21889779",
+      "2018/fire_21889798",
+      "2018/fire_21889808",
+      "2018/fire_21889826",
+      "2018/fire_21890109",
+      "2018/fire_21890111",
+      "2018/fire_21890134",
+      "2018/fire_21890137",
+      "2018/fire_21890160",
+      "2018/fire_21890170",
+      "2018/fire_21890208",
+      "2018/fire_21997770",
+      "2018/fire_21997775",
+      "2018/fire_21997828",
+      "2018/fire_21997844",
+      "2018/fire_21997851",
+      "2018/fire_21997854",
+      "2018/fire_21997864",
+      "2018/fire_21998230",
+      "2018/fire_21999381",
+      "2018/fire_22141195",
+      "2018/fire_22141243",
+      "2018/fire_22141567",
+      "2018/fire_22141576",
+      "2018/fire_22141585",
+      "2018/fire_22141683",
+      "2018/fire_22257882",
+      "2018/fire_22257911",
+      "2018/fire_22257961",
+      "2018/fire_22258421",
+      "2018/fire_22343661",
+      "2018/fire_22343666",
+      "2018/fire_22343688",
+      "2018/fire_22343689"
+    ],
+    "validation_blocks_x_test_years": [
+      "2021/fire_25205245",
+      "2021/fire_25205255",
+      "2021/fire_25294976",
+      "2021/fire_25294977",
+      "2021/fire_25294983",
+      "2021/fire_25294984",
+      "2021/fire_25294999",
+      "2021/fire_25295023",
+      "2021/fire_25295808",
+      "2021/fire_25295818",
+      "2021/fire_25295831",
+      "2021/fire_25295843",
+      "2021/fire_25410845",
+      "2021/fire_25410858",
+      "2021/fire_25411738",
+      "2021/fire_25411739",
+      "2021/fire_25411748",
+      "2021/fire_25411777",
+      "2021/fire_25411795",
+      "2021/fire_25411821",
+      "2021/fire_25411827",
+      "2021/fire_25548182"
+    ],
+    "validation_blocks_x_train_years": [
+      "2019/fire_22939556",
+      "2019/fire_23036803",
+      "2019/fire_23036804",
+      "2019/fire_23036806",
+      "2019/fire_23160475",
+      "2019/fire_23410720",
+      "2020/fire_24027563",
+      "2020/fire_24191673",
+      "2020/fire_24191680",
+      "2020/fire_24191933",
+      "2020/fire_24332872",
+      "2020/fire_24332880",
+      "2020/fire_24332885",
+      "2020/fire_24332894",
+      "2020/fire_24333255",
+      "2020/fire_24461899",
+      "2020/fire_24461930",
+      "2020/fire_24461965",
+      "2020/fire_24461996",
+      "2020/fire_24462033",
+      "2020/fire_24462088",
+      "2020/fire_24462212",
+      "2020/fire_24462243",
+      "2020/fire_24462306",
+      "2020/fire_24463162",
+      "2020/fire_24463172",
+      "2020/fire_24463188"
+    ]
+  },
+  "shares_target": {
+    "test": 0.25,
+    "train": 0.6,
+    "validation": 0.15
+  },
+  "temporal_for_comparison": {
+    "fold": 2,
+    "n_events": {
+      "test": 156,
+      "train": 377,
+      "validation": 74
+    },
+    "note": "o split por ano separa tempo; a sobreposição acima mostra que não separa regiões",
+    "overlap_with_train": {
+      "test": {
+        "share_overlap_gt_50pct": 0.6667,
+        "share_with_any_overlap_of_train": 0.9615
+      },
+      "validation": {
+        "share_overlap_gt_50pct": 0.7703,
+        "share_with_any_overlap_of_train": 0.9595
+      }
+    },
+    "windows": {
+      "test": 3337,
+      "train": 6180,
+      "validation": 1055
+    },
+    "years": {
+      "test": [
+        2021
+      ],
+      "train": [
+        2018,
+        2020
+      ],
+      "validation": [
+        2019
+      ]
+    }
+  },
+  "train_period": {
+    "first_day": "2019-03-07",
+    "last_day": "2020-12-12"
+  },
+  "verification": {
+    "future_only": {
+      "days_from_last_train_day_to_first_day": 47,
+      "events": 62,
+      "fully_after_train": true,
+      "median_gap_to_train_km": 0.0,
+      "min_gap_to_train_km": 0.0,
+      "share_with_any_overlap_of_train": 0.967741935483871,
+      "windows": 1407,
+      "years": [
+        2021
+      ]
+    },
+    "space_only": {
+      "days_from_last_train_day_to_first_day": -527,
+      "events": 51,
+      "fully_after_train": false,
+      "median_gap_to_train_km": 258.7,
+      "min_gap_to_train_km": 58.9,
+      "share_with_any_overlap_of_train": 0.0,
+      "windows": 612,
+      "years": [
+        2019,
+        2020
+      ]
+    },
+    "test": {
+      "days_from_last_train_day_to_first_day": 109,
+      "events": 46,
+      "fully_after_train": true,
+      "median_gap_to_train_km": 278.8,
+      "min_gap_to_train_km": 133.9,
+      "share_with_any_overlap_of_train": 0.0,
+      "windows": 869,
+      "years": [
+        2021
+      ]
+    },
+    "validation": {
+      "days_from_last_train_day_to_first_day": -910,
+      "events": 24,
+      "fully_after_train": false,
+      "median_gap_to_train_km": 268.3,
+      "min_gap_to_train_km": 109.9,
+      "share_with_any_overlap_of_train": 0.0,
+      "windows": 378,
+      "years": [
+        2018
+      ]
+    }
+  },
+  "viability": {
+    "test": {
+      "events": 46,
+      "gate": {
+        "events": 20,
+        "windows": 300
+      },
+      "passes": true,
+      "windows": 869
+    },
+    "validation": {
+      "events": 24,
+      "gate": {
+        "events": 10,
+        "windows": 300
+      },
+      "passes": true,
+      "windows": 378
+    }
+  },
+  "why_report_the_scenarios": "Sozinho, o número do teste não diz de onde vem a perda. `future_only` (blocos de treino, ano de teste) mede o deslocamento temporal com a geografia familiar; `space_only` (blocos de teste, anos de treino) mede o deslocamento espacial dentro do período de treino. Os dois são avaliados com o mesmo modelo treinado na célula de treino, então a diferença entre a queda do teste e a soma das duas quedas é a interação entre os deslocamentos.",
+  "windows": {
+    "dropped": 1764,
+    "future_only": 1407,
+    "sealed": 2844,
+    "space_only": 612,
+    "test": 869,
+    "total": 10572,
+    "train": 2698,
+    "validation": 378
+  },
+  "years": {
+    "test": [
+      2021
+    ],
+    "train": [
+      2019,
+      2020
+    ],
+    "validation": [
+      2018
+    ]
+  },
+  "years_by_split": {
+    "future_only": {
+      "2021": 62
+    },
+    "space_only": {
+      "2019": 21,
+      "2020": 30
+    },
+    "test": {
+      "2021": 46
+    },
+    "train": {
+      "2019": 35,
+      "2020": 125
+    },
+    "validation": {
+      "2018": 24
+    }
+  }
+}
