@@ -358,6 +358,16 @@ class ProtocolTests(unittest.TestCase):
                                 "--report", str(root / "r.json"), "--ledger", str(root / "l.jsonl")])
         self.assertIn("Faltando", str(raised.exception))
 
+    def test_demo_run_cannot_evaluate_test_and_says_why(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs, demo = Path(tmp) / "stconv_runs", Path(tmp) / "demo_runs"
+            demo.mkdir()
+            (demo / "d.json").write_text("{}", encoding="utf-8")
+            with mock.patch.object(train, "RUNS_REPORT_DIR", runs), mock.patch.object(train, "DEMO_REPORT_DIR", demo):
+                with self.assertRaises(SystemExit) as raised:
+                    train.main(["--evaluate-test", "--run-name", "d", "--ledger", str(Path(tmp) / "l.jsonl")])
+        self.assertIn("demonstração", str(raised.exception))
+
     def test_smoke_cannot_evaluate_test_and_halo_must_cover_receptive_field(self) -> None:
         with self.assertRaises(SystemExit):
             train.main(["--evaluate-test", "--run-name", "x", "--max-windows", "3"])

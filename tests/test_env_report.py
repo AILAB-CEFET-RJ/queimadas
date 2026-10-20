@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,6 +44,22 @@ class EnvReportTests(unittest.TestCase):
 
     def test_missing_package_is_reported_as_none(self) -> None:
         self.assertIsNone(env_report._package_version("pacote-inexistente-wsts"))
+
+    def test_regenerated_notebook_does_not_make_the_tree_dirty(self) -> None:
+        # Os notebooks sobem com saídas e os builders os reescrevem; o código que produziu o resultado é o mesmo.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "notebooks").mkdir()
+            (root / "notebooks" / "n.ipynb").write_text("{}", encoding="utf-8")
+            (root / "a.py").write_text("x = 1", encoding="utf-8")
+            subprocess.run([*git, "add", "-A"], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "c"], check=True)
+            (root / "notebooks" / "n.ipynb").write_text('{"x": 1}', encoding="utf-8")
+            self.assertFalse(env_report.git_state(root)["dirty"])
+            (root / "a.py").write_text("x = 2", encoding="utf-8")
+            self.assertTrue(env_report.git_state(root)["dirty"])
 
 
 if __name__ == "__main__":

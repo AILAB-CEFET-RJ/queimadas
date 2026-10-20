@@ -304,7 +304,7 @@ def masked_bce_with_logits(logits: Any, target: Any, mask: Any, pos_weight: floa
 
 
 def estimate_pos_weight(dataset: WSTSWindowDataset, max_samples: int, seed: int) -> dict[str, Any]:
-    """Negativos/positivos sob a mesma distribuição de recortes do treino (regra R5)."""
+    """Negativos/positivos sob a mesma distribuição de recortes do treino."""
     rng = random.Random(seed)
     indices = list(range(len(dataset)))
     rng.shuffle(indices)
@@ -737,10 +737,14 @@ def shift_decomposition(measured: dict[str, Any]) -> dict[str, Any]:
 def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     """Avalia o teste uma vez a partir do checkpoint e do threshold de validação de um run."""
     if args.max_windows is not None:
-        raise SystemExit("Smoke (--max-windows) não pode avaliar o teste (regra R9).")
+        raise SystemExit("Smoke (--max-windows) não pode avaliar o teste.")
     if not args.run_name:
         raise SystemExit("--evaluate-test exige --run-name de um treino completo.")
     report_path = args.report or RUNS_REPORT_DIR / f"{args.run_name}.json"
+    if not report_path.exists():
+        demo = " É um run de demonstração (`--max-events`), que nunca avalia o teste." if (
+            DEMO_REPORT_DIR / f"{args.run_name}.json").exists() else ""
+        raise SystemExit(f"Não há relatório de treino completo em {report_path}.{demo}")
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if report.get("kind") != "full" or not report.get("eligible_for_test"):
         raise SystemExit(

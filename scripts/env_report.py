@@ -41,7 +41,9 @@ def _git(path: Path, *args: str) -> str | None:
 
 
 def git_state(path: Path) -> dict[str, Any]:
-    status = _git(path, "status", "--porcelain", "--untracked-files=no")
+    # Os notebooks são visões somente leitura dos artefatos: regenerá-los reescreve um arquivo versionado sem
+    # mudar o código que produziu o resultado, então não contam como árvore suja.
+    status = _git(path, "status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude,glob)**/*.ipynb")
     return {
         "commit": _git(path, "rev-parse", "HEAD"),
         "remote": _git(path, "remote", "get-url", "origin"),

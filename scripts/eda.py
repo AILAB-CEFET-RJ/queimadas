@@ -641,7 +641,7 @@ class AspectGridCheck:
 
 
 class CompositeLookAheadCheck:
-    """Look-ahead do NDVI/EVI2 por diferença-em-diferenças alinhada às trocas de composto (B1).
+    """Look-ahead do NDVI/EVI2 por diferença-em-diferenças alinhada às trocas de composto.
 
     Dias contados pela data (`dia = data − primeira data do evento`), não pelo índice da imagem.
     Troca de composto = dia em que mais da metade dos pixels válidos muda (evita trocas espúrias).
@@ -776,7 +776,7 @@ class CompositeLookAheadCheck:
 
 
 class ForecastHorizonCheck:
-    """Perfil corr(GFS_t, GRIDMET_{t+k}) contra hipóteses de horizonte (R2 da revisão científica).
+    """Perfil corr(GFS_t, GRIDMET_{t+k}) contra hipóteses de horizonte.
 
     H0: previsão do próprio dia t (perfil = autocorrelação do GRIDMET); H1: média ponderada dos dias
     t..t+9 (filtro lexicográfico F010–F239). Séries = médias espaciais diárias, centradas por evento,
