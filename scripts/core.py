@@ -954,6 +954,31 @@ def fit_normalization_for_split(hdf5_root: str | Path, split: SplitSpec) -> dict
     return split_normalization_payload(stats, split)
 
 
+def fire_rate_for_events(events: Sequence[EventRef]) -> dict[str, Any]:
+    """Taxa de pixels com fogo ativo em todas as imagens dos eventos de treino, e o `pos_weight` = 1/taxa.
+
+    É a regra do artigo do dataset: `train.py` (`before_instantiate_classes`) sobrescreve o peso da classe positiva
+    de todo run com `1 / (1 − missing_values[-1])` dos anos de treino, isto é, 1/(fração de pixels com detecção)
+    nas imagens inteiras. No HDF5 o NaN do canal de fogo já virou 0, então "com detecção" é `> 0`.
+    """
+    fire = total = 0
+    for event in events:
+        for _, block in iter_event_days(event):
+            hours = block[:, ACTIVE_FIRE_CHANNEL]
+            fire += int(np.count_nonzero(np.nan_to_num(hours, nan=0.0) > 0))
+            total += int(hours.size)
+    if fire == 0:
+        raise ValueError("Nenhum pixel com fogo nos eventos de treino; pos_weight indefinido.")
+    return {
+        "fire_pixels": fire,
+        "total_pixels": total,
+        "fire_rate": fire / total,
+        "pos_weight": total / fire,
+        "train_event_keys": sorted(e.key for e in events),
+        "rule": "1 / fração de pixels com fogo em todas as imagens dos eventos de treino (artigo, train.py)",
+    }
+
+
 def split_normalization_payload(stats: StreamingChannelStats, split: SplitSpec) -> dict[str, Any]:
     """JSON de normalização para um `SplitSpec`, com a identidade do conjunto de treino registrada.
 

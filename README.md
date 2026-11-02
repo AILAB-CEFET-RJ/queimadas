@@ -79,8 +79,10 @@ python scripts/convert_hdf5.py
 python scripts/eda.py
 python scripts/build_eda_notebook.py
 
-# 4. STConvS2S: medir o custo por época ANTES de ver qualquer métrica
-python scripts/stconv_train.py --timing-only --run-name tempo
+# 4. STConvS2S — baseline com a receita do artigo do dataset nos 12 folds (retomável; ~3 dias numa GPU de 6 GB)
+python scripts/run_baseline.py
+#    medir o custo por época ANTES de ver qualquer métrica
+python scripts/stconv_train.py --recipe paper --accumulate 2 --timing-only --run-name tempo
 #    os 9 runs pré-registrados (retomável; avalia o teste uma vez ao fim de cada run, salvo com --skip-test)
 python scripts/run_preregistered.py
 #    ou um run isolado, e a avaliação única do teste a partir do checkpoint
@@ -115,6 +117,32 @@ Dois protocolos convivem de propósito.
   critério de escolha do fold foram fixados antes de olhar qualquer rótulo. `make_splits.py` recusa escrever
   um fold que não passe neles.
 - **Espacial (só blocos)**: diagnóstico da sobreposição e contraparte de volume, não protocolo de avaliação.
+
+## Baseline: a receita do artigo
+
+`run_baseline.py` treina o STConvS2S nos 12 folds oficiais por ano, com o fold 2 primeiro, e avalia o teste de
+cada fold uma única vez; o número reportado é a média ± desvio do AP de teste entre os folds
+(`reports/baseline_paper_summary.json`). Cada run usa `stconv_train.py --recipe paper`, que reproduz a receita dos
+modelos multitemporais do artigo (`cfgs/*/wandb_table5.yaml`, `src/train.py` e `FireSpreadDataModule.py` do
+repositório oficial): lote 32, 10.000 passos, AdamW lr 0,01, flips e rotações de 90° no treino, todas as features e
+semente 0. Como no oficial, o checkpoint é o de menor `val_loss` medido em recortes de treino aumentados da
+validação, ressorteados a cada época, e o teste usa o `center_crop_x32`. A perda é BCE com o peso da classe
+positiva = 1/(taxa de pixels com fogo nas imagens de treino do fold), a regra que o `train.py` oficial aplica a
+todo run; o relatório de cada fold registra o valor calculado e o da tabela oficial.
+
+Diferenças em relação ao repositório oficial, todas deliberadas:
+
+- **Ângulos no aumento de dados**: os flips corrigem direção e eixo no referencial da grade, que no WSTS está
+  girada de γ (até ~13°) em relação ao norte verdadeiro; o oficial supõe a grade alinhada e erra até 2γ.
+- **Codificação**: seno e cosseno dos ângulos (o oficial usa só o seno, problema reconhecido pelos autores) e
+  flags de ausência por grupo de canais.
+- **Lote**: 32 efetivo, em micro-lotes (`--accumulate`) quando não cabe na GPU; o BatchNorm vê o micro-lote.
+- **Precisão**: AMP fp16 na GPU (o oficial usa fp32).
+- **Canal de hora de detecção**: não entra; só o binário de fogo ativo.
+
+O executor retoma de onde parou: um fold terminado é pulado e um fold interrompido continua do `last.pt` da última
+época. Enquanto roda, pede ao sistema para não suspender (no Windows; no Linux, rode sob `systemd-inhibit`).
+Os canais de NDVI/EVI2 entram no baseline, com a ressalva de *look-ahead* descrita abaixo.
 
 ## Pré-registro do experimento STConvS2S
 

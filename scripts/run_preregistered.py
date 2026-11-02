@@ -25,9 +25,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.io_utils import write_json
 from scripts.core import PREREGISTERED_EPOCHS
-from scripts.stconv_train import DEMO_REPORT_DIR, RUNS_REPORT_DIR, ledger_entries
+from scripts.run_registry import DEMO_REPORT_DIR, RUNS_REPORT_DIR, TEST_LEDGER, ledger_entries
 
-TEST_LEDGER = REPO_ROOT / "reports" / "test_ledger.jsonl"
 DEFAULT_REPORT = Path("reports/preregistered_runs.json")
 CONFIGURATIONS = {"principal": [], "sem_veg": ["vegetation_index"], "sem_gfs": ["gfs"]}
 SEEDS = (42, 43, 44)

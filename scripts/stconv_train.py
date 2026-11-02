@@ -39,7 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.io_utils import check_resources, resource_snapshot, sha256_file, write_json
+from scripts.io_utils import atomic_write, check_resources, resource_snapshot, sha256_file, write_json
 from scripts.core import (
     DEFAULT_DATA_ROOT,
     DEFAULT_FOLD,
@@ -49,9 +49,13 @@ from scripts.core import (
     SPATIOTEMPORAL_FOLD,
     SplitSpec,
     check_normalization,
+    fire_rate_for_events,
     resolve_split,
 )
 from scripts.env_report import provenance
+from scripts.run_registry import (
+    DEMO_REPORT_DIR, RUNS_REPORT_DIR, TEST_LEDGER, ledger_entries, pending_test_report,
+)
 from scripts.stconv_dataset import (
     DEFAULT_HALO,
     DEFAULT_PATCH,
@@ -65,14 +69,36 @@ STCONV_ROOT = REPO_ROOT / ".stconvs2s"
 LOGIT_RANGE = (-20.0, 20.0)
 FINE_BINS = 2**16
 EVENT_BINS = 2**12
-RUNS_REPORT_DIR = REPO_ROOT / "reports" / "stconv_runs"
-DEMO_REPORT_DIR = REPO_ROOT / "reports" / "demo_runs"
 SMOKE_REPORT = REPO_ROOT / "reports" / "stconv_smoke_metrics.json"
 TIMING_REPORT = REPO_ROOT / "reports" / "stconv_timing.json"
-TEST_LEDGER = REPO_ROOT / "reports" / "test_ledger.jsonl"
 HDF5_MANIFEST = REPO_ROOT / "reports" / "hdf5_manifest.json"
 SPLITS_DIR = REPO_ROOT / "config" / "splits"
 VIEWS = ("all", "crop32", "new_vs_t", "new_vs_window")
+
+# Receitas de treino. `pre_registered` é a do pré-registro original (fold 2, 20 épocas). `paper` reproduz a dos
+# modelos multitemporais do artigo do dataset (`cfgs/*/wandb_table5.yaml`, `trainer_single_gpu.yaml`, `train.py` e
+# `FireSpreadDataModule.py` do repositório oficial): lote 32, 10.000 passos, AdamW lr 0,01 (weight decay padrão do
+# torch, 0,01), checkpoint pelo menor `val_loss` medido em recortes de treino aumentados da validação (o oficial cria
+# o `val_dataset` com `is_train=True`), `center_crop_x32` no teste, `pos_weight` = 1/taxa de fogo nas imagens
+# inteiras dos anos de treino (o `train.py` oficial sobrescreve o valor dos YAML), todas as features, semente 0.
+# Qualquer argumento passado explicitamente na linha de comando vence a receita.
+RECIPES: dict[str, dict[str, Any]] = {
+    "pre_registered": {
+        "epochs": 20, "max_steps": None, "batch_size": 8, "accumulate": 1, "lr": 1e-3, "weight_decay": 1e-4,
+        "seed": 42, "include_forecast_precip": False, "augment": False, "eval_region": "full",
+        "checkpoint_metric": "val_ap", "val_sampling": "region", "pos_weight_source": "crops",
+    },
+    "paper": {
+        "epochs": None, "max_steps": 10_000, "batch_size": 32, "accumulate": 1, "lr": 1e-2, "weight_decay": 1e-2,
+        "seed": 0, "include_forecast_precip": True, "augment": True, "eval_region": "crop32",
+        "checkpoint_metric": "val_loss", "val_sampling": "train_crops", "pos_weight_source": "fire_rate",
+    },
+}
+CHECKPOINT_METRICS = ("val_ap", "val_loss")
+# Não definem o run: mudar entre a queda e a retomada é permitido (e não entra na impressão digital do last.pt).
+RESUME_VOLATILE = frozenset({"resume", "num_workers", "force", "report", "ledger", "eval_batch_size", "bootstrap"})
+# Semente dos recortes de validação, separada da do treino para que os dois não sorteiem os mesmos recortes.
+VALIDATION_CROP_SEED_OFFSET = 7_919
 BASELINES = {"persistence_all_detections_t": "fire_t", "persistence_last_pass_t": "fire_last_t", "persistence_window_union": "fire_window"}
 
 
@@ -162,6 +188,7 @@ class EvaluationAccumulator:
     """
 
     def __init__(self) -> None:
+        self.loss: float | None = None  # perda média por pixel, quando `evaluate` recebe o pos_weight
         self.model = {view: LogitHistogram() for view in VIEWS}
         self.baselines = {view: {name: np.zeros(4, dtype=np.int64) for name in BASELINES} for view in VIEWS}
         self.per_event: dict[str, dict[int, np.ndarray]] = {
@@ -303,6 +330,68 @@ def masked_bce_with_logits(logits: Any, target: Any, mask: Any, pos_weight: floa
     return (loss * mask).sum() / mask.sum().clamp_min(1.0)
 
 
+def train_one_epoch(
+    model: Any, loader: Iterable[dict[str, Any]], optimizer: Any, scaler: Any, *, device: Any, use_amp: bool,
+    accumulate: int, pos_weight: float, step: int, max_steps: int | None,
+) -> dict[str, Any]:
+    """Uma época com acumulação de gradiente; para no meio se `max_steps` for atingido.
+
+    Cada passo do otimizador consome `accumulate` micro-lotes. Os micro-lotes que sobram no fim da época viram um
+    passo com o gradiente reescalado para a média deles, que é o que um lote parcial faria sem acumulação.
+    `skipped_steps` conta os passos que o GradScaler descartou por overflow (a escala cai): com AMP, alguns dos
+    passos contados podem não ter atualizado os pesos. `epoch_complete` é falso quando `max_steps` interrompeu a
+    época antes do último lote — caso em que o Lightning do oficial não valida.
+    """
+    import torch
+
+    model.train()
+    losses, pending, skipped, batches = [], 0, 0, 0
+    stopped_by_max_steps = False
+
+    def optimizer_step() -> None:
+        nonlocal skipped
+        scale = scaler.get_scale()
+        scaler.step(optimizer)
+        scaler.update()
+        skipped += int(scaler.is_enabled() and scaler.get_scale() < scale)
+        optimizer.zero_grad(set_to_none=True)
+
+    optimizer.zero_grad(set_to_none=True)
+    for batch in loader:
+        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
+            logits = model(batch["x"].to(device, non_blocking=True))[:, :, -1:]
+        loss = masked_bce_with_logits(logits.float(), batch["y"].to(device), batch["mask"].to(device), pos_weight)
+        scaler.scale(loss / accumulate).backward()
+        losses.append(float(loss.detach()))
+        pending, batches = pending + 1, batches + 1
+        if pending == accumulate:
+            optimizer_step()
+            pending, step = 0, step + 1
+            if max_steps is not None and step >= max_steps:
+                stopped_by_max_steps = True
+                break
+    if pending:
+        scaler.unscale_(optimizer)
+        for parameter in model.parameters():
+            if parameter.grad is not None:
+                parameter.grad.mul_(accumulate / pending)
+        optimizer_step()
+        step += 1
+    complete = not stopped_by_max_steps or batches == len(loader)  # type: ignore[arg-type]
+    return {"losses": losses, "step": step, "epoch_complete": complete, "skipped_steps": skipped, "batches": batches}
+
+
+def atomic_torch_save(payload: dict[str, Any], path: Path) -> None:
+    import torch
+
+    atomic_write(path, lambda stream: torch.save(payload, stream))
+
+
+def config_fingerprint(config: dict[str, Any]) -> dict[str, Any]:
+    """O que define o run: tudo menos o que só muda a infraestrutura ou a forma de chamar."""
+    return {k: v for k, v in config.items() if k not in RESUME_VOLATILE}
+
+
 def estimate_pos_weight(dataset: WSTSWindowDataset, max_samples: int, seed: int) -> dict[str, Any]:
     """Negativos/positivos sob a mesma distribuição de recortes do treino."""
     rng = random.Random(seed)
@@ -336,17 +425,29 @@ def build_model(n_channels: int, t_in: int, config: dict[str, Any], device: Any)
     ).to(device)
 
 
-def evaluate(model: Any, loader: Iterable[dict[str, Any]], device: Any, use_amp: bool) -> EvaluationAccumulator:
+def evaluate(
+    model: Any, loader: Iterable[dict[str, Any]], device: Any, use_amp: bool, pos_weight: float | None = None
+) -> EvaluationAccumulator:
+    """Métricas em streaming; com `pos_weight`, também a perda média por pixel avaliado (`val_loss`)."""
     import torch
+    import torch.nn.functional as F
 
     accumulator = EvaluationAccumulator()
+    loss_sum, loss_pixels = 0.0, 0.0
     model.eval()
     with torch.no_grad():
         for batch in loader:
             with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
                 logits = model(batch["x"].to(device, non_blocking=True))[:, :, -1:]
+            if pos_weight is not None:
+                target, mask = batch["y"].to(device), batch["mask"].to(device)
+                weight = torch.as_tensor(pos_weight, device=device, dtype=torch.float32)
+                loss = F.binary_cross_entropy_with_logits(logits.float(), target, pos_weight=weight, reduction="none")
+                loss_sum += float((loss * mask).sum())
+                loss_pixels += float(mask.sum())
             arrays = {k: v.numpy() if hasattr(v, "numpy") else np.asarray(v) for k, v in batch.items() if k != "x"}
             accumulator.update(logits.float().cpu().numpy(), arrays)
+    accumulator.loss = loss_sum / loss_pixels if pos_weight is not None and loss_pixels else None
     return accumulator
 
 
@@ -390,19 +491,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--t-in", type=int, default=DEFAULT_T_IN)
     parser.add_argument("--patch", type=int, default=DEFAULT_PATCH)
     parser.add_argument("--halo", type=int, default=DEFAULT_HALO)
-    parser.add_argument("--include-forecast-precip", action="store_true")
+    parser.add_argument("--recipe", choices=sorted(RECIPES), default="pre_registered",
+                        help="Receita de treino (ver RECIPES). Argumentos explícitos vencem a receita.")
+    parser.add_argument("--include-forecast-precip", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--drop-groups", nargs="*", default=[], choices=sorted(DROPPABLE_GROUPS))
-    parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=None, help="Máximo de épocas (receita).")
+    parser.add_argument("--max-steps", type=int, default=None, help="Máximo de passos do otimizador (receita).")
+    parser.add_argument("--batch-size", type=int, default=None, help="Lote efetivo por passo (receita).")
+    parser.add_argument("--accumulate", type=int, default=None,
+                        help="Divide o lote efetivo em N micro-lotes com acumulação de gradiente (cabe em menos VRAM).")
     parser.add_argument("--eval-batch-size", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--weight-decay", type=float, default=None)
+    parser.add_argument("--augment", action=argparse.BooleanOptionalAction, default=None,
+                        help="Flips e rotações de 90° no treino, com ângulos corrigidos por γ (receita).")
+    parser.add_argument("--eval-region", choices=("full", "crop32"), default=None,
+                        help="Região avaliada na validação e no teste (receita).")
+    parser.add_argument("--checkpoint-metric", choices=CHECKPOINT_METRICS, default=None,
+                        help="Critério do checkpoint: maior AP ou menor perda de validação (receita).")
+    parser.add_argument("--val-sampling", choices=("region", "train_crops"), default=None,
+                        help="`region`: valida a região de avaliação inteira a cada época. `train_crops`: valida em "
+                             "recortes de treino aumentados (como o oficial) e mede a região só no checkpoint (receita).")
+    parser.add_argument("--pos-weight-source", choices=("crops", "fire_rate"), default=None,
+                        help="`crops`: neg/pos nos recortes de treino. `fire_rate`: 1/taxa de fogo nas imagens inteiras "
+                             "dos eventos de treino, como o oficial (receita).")
+    parser.add_argument("--resume", action="store_true", help="Retoma o treino de <data-root>/runs/<run>/last.pt.")
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--hidden-dim", type=int, default=32)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--pos-weight-samples", type=int, default=2000)
     parser.add_argument("--num-workers", type=int, default=0, help="0 recomendado nesta máquina (RAM ~2 GiB livre).")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--bootstrap", type=int, default=1000)
     parser.add_argument("--max-windows", type=int, default=None, help="Smoke: limita janelas de treino/validação.")
     parser.add_argument("--max-events", type=int, default=None,
@@ -414,7 +533,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="Permite sobrescrever relatório/reavaliar teste (registrado).")
     parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--ledger", type=Path, default=TEST_LEDGER, help="Livro-razão append-only de avaliações do teste.")
-    return parser.parse_args(argv)
+    return apply_recipe(parser.parse_args(argv))
+
+
+def apply_recipe(args: argparse.Namespace) -> argparse.Namespace:
+    """Preenche com a receita tudo o que não foi passado explicitamente, e confere a combinação."""
+    for name, value in RECIPES[args.recipe].items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
+    if args.epochs is None and args.max_steps is None:
+        raise SystemExit("Defina --epochs ou --max-steps.")
+    if args.accumulate < 1 or args.batch_size % args.accumulate:
+        raise SystemExit(f"--batch-size {args.batch_size} precisa ser múltiplo de --accumulate {args.accumulate}.")
+    return args
 
 
 def sample_events(events: list[Any], limit: int | None) -> list[Any]:
@@ -444,14 +575,6 @@ def _loaders(args: argparse.Namespace, dataset: WSTSWindowDataset, *, shuffle: b
         worker_init_fn=worker_init_fn,
         pin_memory=device.type == "cuda",
     )
-
-
-def ledger_entries(ledger: Path, run_name: str) -> list[dict[str, Any]]:
-    """Linhas do livro-razão referentes a um run (avaliações anteriores do teste)."""
-    if not ledger.exists():
-        return []
-    entries = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return [entry for entry in entries if entry.get("run_name") == run_name]
 
 
 def split_paths(args: argparse.Namespace) -> tuple[int, Path, Path | None]:
@@ -485,6 +608,60 @@ def resolve_protocol_split(hdf5_root: Path, kind: str, fold: int, definition_pat
     return resolve_split(hdf5_root, kind, fold, definition=definition)
 
 
+OFFICIAL_UTILS = REPO_ROOT / ".wildfirespreadts" / "src" / "dataloader" / "utils.py"
+
+
+def official_pos_weight(train_years: Iterable[int]) -> float | None:
+    """`pos_weight` que o `train.py` oficial usaria para estes anos de treino (tabela de `utils.py`), se houver clone."""
+    if not OFFICIAL_UTILS.exists():
+        return None
+    import importlib.util
+
+    try:
+        spec = importlib.util.spec_from_file_location("wsts_official_utils", OFFICIAL_UTILS)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        _, _, missing = module.get_means_stds_missing_values(sorted(train_years))
+    except Exception:  # noqa: BLE001 - referência opcional; a ausência fica registrada como None
+        return None
+    return float(1.0 / (1.0 - missing[-1]))
+
+
+def resolve_pos_weight(
+    args: argparse.Namespace, train_events: list[Any], *, full_train_set: bool, normalization: dict[str, Any],
+    normalization_path: Path, common: dict[str, Any],
+) -> dict[str, Any]:
+    """Peso da classe positiva conforme `--pos-weight-source`, com a origem registrada.
+
+    `fire_rate` fica em cache ao lado da normalização (`*_fire_rate.json`) e é conferido pelas chaves dos eventos,
+    como a normalização; só é gravado quando o conjunto de treino é o do split inteiro.
+    """
+    if args.pos_weight_source == "crops":
+        dataset = WSTSWindowDataset(train_events, normalization, mode="train", seed=args.seed,
+                                    max_windows=args.max_windows, **common)
+        result = estimate_pos_weight(dataset, args.pos_weight_samples, args.seed)
+        dataset.close()
+        return {**result, "source": "neg/pos em recortes de treino"}
+    keys = sorted(e.key for e in train_events)
+    cache = normalization_path.with_name(normalization_path.name.replace("train_normalization", "fire_rate"))
+    payload = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else None
+    if payload is None or payload.get("train_event_keys") != keys:
+        print(f"[pos_weight] taxa de fogo em {len(train_events)} eventos de treino", flush=True)
+        payload = fire_rate_for_events(train_events)
+        if full_train_set:
+            write_json(payload, cache)
+    years = sorted({e.year for e in train_events})
+    return {
+        "pos_weight": payload["pos_weight"],
+        "fire_rate": payload["fire_rate"],
+        "fire_pixels": payload["fire_pixels"],
+        "total_pixels": payload["total_pixels"],
+        "source": payload["rule"],
+        "official_table_pos_weight": official_pos_weight(years) if full_train_set else None,
+        "cache": cache.name if full_train_set else None,
+    }
+
+
 def run_training(args: argparse.Namespace) -> dict[str, Any]:
     import torch
 
@@ -512,10 +689,16 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
     )
     if tested:
         raise SystemExit(f"O run {run_name!r} já teve o teste avaliado; escolha outro --run-name.")
-    if (report_path.exists() or checkpoint.exists()) and not args.force:
-        raise SystemExit(f"{report_path} ou {checkpoint} já existe; use outro --run-name ou --force.")
+    last_checkpoint = checkpoint.parent / "last.pt"
+    if args.resume:
+        if report_path.exists():
+            raise SystemExit(f"{report_path} já existe: o run terminou, não há o que retomar.")
+        if not last_checkpoint.exists():
+            raise SystemExit(f"Nada para retomar: {last_checkpoint} não existe.")
+    elif (report_path.exists() or checkpoint.exists() or last_checkpoint.exists()) and not args.force:
+        raise SystemExit(f"{report_path} ou {checkpoint.parent} já existe; use outro --run-name, --resume ou --force.")
     if args.timing_only:
-        args.epochs = 1
+        args.epochs, args.max_steps = 1, None
     check_resources(min_available_ram_gib=0.5, min_disk_free_gib=2)
     determinism = configure_determinism(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
@@ -543,75 +726,155 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
              else {name: sorted({e.year for e in items}) for name, items in spec.events.items()})
     train_events = sample_events(spec.events["train"], args.max_events)
     val_events = sample_events(spec.events["validation"], args.max_events)
-    train_set = WSTSWindowDataset(train_events, normalization, mode="train", seed=args.seed, max_windows=args.max_windows, **common)
-    val_set = WSTSWindowDataset(val_events, normalization, mode="eval", max_windows=args.max_windows, **common)
-    pos_weight = estimate_pos_weight(train_set, args.pos_weight_samples, args.seed)
-    train_loader = _loaders(args, train_set, shuffle=True, batch_size=args.batch_size, device=device)
+    train_set = WSTSWindowDataset(train_events, normalization, mode="train", seed=args.seed, max_windows=args.max_windows,
+                                  augment=args.augment, **common)
+    val_set = WSTSWindowDataset(val_events, normalization, mode="eval", max_windows=args.max_windows,
+                                eval_region=args.eval_region, **common)
+    crops_mode = args.val_sampling == "train_crops"
+    # No oficial a validação passa pelo mesmo `augment` do treino, ressorteado a cada época: aqui, um recorte por
+    # janela e por época, de uma semente própria.
+    val_crop_set = WSTSWindowDataset(
+        val_events, normalization, mode="train", seed=args.seed + VALIDATION_CROP_SEED_OFFSET,
+        max_windows=args.max_windows, augment=args.augment, **common) if crops_mode else None
+    pos_weight = resolve_pos_weight(
+        args, train_events, full_train_set=args.max_events is None and args.max_windows is None,
+        normalization=normalization, normalization_path=normalization_path, common=common)
+    micro_batch = args.batch_size // args.accumulate
+    train_loader = _loaders(args, train_set, shuffle=True, batch_size=micro_batch, device=device)
     val_loader = _loaders(args, val_set, shuffle=False, batch_size=args.eval_batch_size, device=device)
+    val_crop_loader = (_loaders(args, val_crop_set, shuffle=False, batch_size=args.eval_batch_size, device=device)
+                       if crops_mode else None)
 
-    config = {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()}
+    config = {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items() if k != "resume"}
     model = build_model(len(train_set.channel_names), args.t_in, config, device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    use_loss = args.checkpoint_metric == "val_loss"
 
-    history, best_ap, best_epoch, best_validation = [], -1.0, None, None
+    history: list[dict[str, Any]] = []
+    best_metric, best_epoch, best_state, best_validation = None, None, None, None
+    epoch, step, skipped_steps, resumed_from = 0, 0, 0, None
+    elapsed_before, peak_before = 0.0, 0.0
+    if args.resume:
+        state = torch.load(last_checkpoint, map_location="cpu", weights_only=False)
+        recorded, current = config_fingerprint(state["config"]), config_fingerprint(config)
+        changed = sorted(k for k in set(recorded) | set(current) if recorded.get(k) != current.get(k))
+        if changed:
+            raise SystemExit(f"O last.pt foi gravado com outra configuração ({', '.join(changed)}); não dá para retomar.")
+        if state["pos_weight"] != pos_weight["pos_weight"]:
+            raise SystemExit("O last.pt foi gravado com outro pos_weight; não dá para retomar.")
+        model.load_state_dict(state["model"])
+        optimizer.load_state_dict(state["optimizer"])
+        scaler.load_state_dict(state["scaler"])
+        epoch, step, history = state["epoch"], state["step"], state["history"]
+        best_metric, best_epoch, best_state = state["best_metric"], state["best_epoch"], state["best_state"]
+        skipped_steps, elapsed_before, peak_before = state["skipped_steps"], state["elapsed_seconds"], state["peak_vram_mib"]
+        if best_state is not None:
+            # O best.pt é derivado do last.pt: regravá-lo garante que os dois contam a mesma história.
+            atomic_torch_save({"model": best_state, "epoch": best_epoch, "config": config}, checkpoint)
+        resumed_from = {"epoch": epoch, "step": step}
+        print(f"Retomando depois da época {epoch} (passo {step}).", flush=True)
     started = time.perf_counter()
-    for epoch in range(1, args.epochs + 1):
+    while (args.epochs is None or epoch < args.epochs) and (args.max_steps is None or step < args.max_steps):
+        epoch += 1
         train_set.set_epoch(epoch)
-        model.train()
-        losses = []
+        # Ordem do embaralhamento função só de (semente, época): retomar reproduz a época que faltava.
+        train_loader.generator.manual_seed(args.seed * 1_000_003 + epoch)
         epoch_started = time.perf_counter()
-        for batch in train_loader:
-            optimizer.zero_grad(set_to_none=True)
-            with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
-                logits = model(batch["x"].to(device, non_blocking=True))[:, :, -1:]
-            loss = masked_bce_with_logits(logits.float(), batch["y"].to(device), batch["mask"].to(device), pos_weight["pos_weight"])
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            losses.append(float(loss.detach()))
+        result = train_one_epoch(model, train_loader, optimizer, scaler, device=device, use_amp=use_amp,
+                                 accumulate=args.accumulate, pos_weight=pos_weight["pos_weight"], step=step,
+                                 max_steps=args.max_steps)
+        step, skipped_steps = result["step"], skipped_steps + result["skipped_steps"]
+        train_loss = float(np.mean(result["losses"])) if result["losses"] else float("nan")
+        if not np.isfinite(train_loss):
+            raise SystemExit(f"Perda de treino não finita na época {epoch} (passo {step}): o treino divergiu.")
         train_seconds = time.perf_counter() - epoch_started
         train_set.close()
         check_resources(min_available_ram_gib=0.3, min_disk_free_gib=1)
-        validation = evaluate(model, val_loader, device, use_amp)
-        val_set.close()
-        if args.timing_only:
-            # Pré-registro: o orçamento de épocas é fixado sem olhar métricas de validação.
-            timing = {
-                "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "kind": "timing",
-                "eligible_for_test": False,
-                "n_train_windows": len(train_set.windows),
-                "n_validation_windows": len(val_set.windows),
-                "train_seconds_per_epoch": round(train_seconds, 1),
-                "validation_seconds": round(time.perf_counter() - epoch_started - train_seconds, 1),
-                "peak_vram_mib": round(torch.cuda.max_memory_allocated() / 2**20, 1) if device.type == "cuda" else None,
-                "config": config,
-                "provenance": provenance({"normalization": normalization_path, "hdf5_manifest": HDF5_MANIFEST}),
-                "note": "métricas de validação calculadas apenas para medir tempo e descartadas sem registro",
-            }
-            write_json(timing, report_path)
-            print(f"Tempo: treino {timing['train_seconds_per_epoch']} s/época, validação {timing['validation_seconds']} s")
-            return timing
-        summary = validation.model["all"].summary()
-        if summary["average_precision"] is None:
-            raise SystemExit("Validação sem positivos: AP e threshold indefinidos.")
-        ap = summary["average_precision"]
-        history.append({
-            "epoch": epoch,
-            "train_loss": float(np.mean(losses)) if losses else None,
-            "val_ap": ap,
-            "val_ap_new_vs_t": validation.model["new_vs_t"].summary()["average_precision"],
-            "train_seconds": round(train_seconds, 1),
-            "epoch_seconds": round(time.perf_counter() - epoch_started, 1),
-        })
-        print(f"época {epoch}: loss={history[-1]['train_loss']:.4f} AP_val={ap:.4f} ({history[-1]['epoch_seconds']} s)", flush=True)
-        if ap > best_ap:
-            best_ap, best_epoch, best_validation = ap, epoch, validation
-            torch.save({"model": model.state_dict(), "epoch": epoch, "config": config}, checkpoint)
+        # Como no Lightning do oficial: uma época cortada por max_steps antes do último lote não é validada — a
+        # menos que nenhuma época tenha sido validada ainda (só acontece em ensaios curtos).
+        validate = result["epoch_complete"] or best_epoch is None
+        entry: dict[str, Any] = {"epoch": epoch, "step": step, "train_loss": train_loss,
+                                 "epoch_complete": result["epoch_complete"], "validated": validate,
+                                 "train_seconds": round(train_seconds, 1)}
+        improved = False
+        if validate:
+            if crops_mode:
+                val_crop_set.set_epoch(epoch)
+            validation = evaluate(model, val_crop_loader if crops_mode else val_loader, device, use_amp,
+                                  pos_weight=pos_weight["pos_weight"])
+            (val_crop_set if crops_mode else val_set).close()
+            if args.timing_only:
+                # Pré-registro: o orçamento é fixado sem olhar métricas de validação.
+                timing = {
+                    "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "kind": "timing",
+                    "eligible_for_test": False,
+                    "n_train_windows": len(train_set.windows),
+                    "n_validation_windows": len(val_set.windows),
+                    "train_seconds_per_epoch": round(train_seconds, 1),
+                    "validation_seconds": round(time.perf_counter() - epoch_started - train_seconds, 1),
+                    "validation_sampling": args.val_sampling,
+                    "peak_vram_mib": round(torch.cuda.max_memory_allocated() / 2**20, 1) if device.type == "cuda" else None,
+                    "config": config,
+                    "provenance": provenance({"normalization": normalization_path, "hdf5_manifest": HDF5_MANIFEST}),
+                    "note": "métricas de validação calculadas apenas para medir tempo e descartadas sem registro",
+                }
+                write_json(timing, report_path)
+                print(f"Tempo: treino {timing['train_seconds_per_epoch']} s/época, validação {timing['validation_seconds']} s")
+                return timing
+            ap = validation.model["all"].summary()["average_precision"]
+            if ap is None and not crops_mode:
+                raise SystemExit("Validação sem positivos: AP e threshold indefinidos.")
+            metric = validation.loss if use_loss else ap
+            # Métrica não finita nunca é a melhor: um NaN não pode prender o checkpoint numa época.
+            finite = metric is not None and bool(np.isfinite(metric))
+            improved = finite and (best_metric is None or (metric < best_metric if use_loss else metric > best_metric))
+            entry.update({"val_loss": validation.loss, "val_ap": ap,
+                          "val_ap_new_vs_t": validation.model["new_vs_t"].summary()["average_precision"],
+                          "val_sampling": args.val_sampling})
+            if improved:
+                best_metric, best_epoch = metric, epoch
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                best_validation = None if crops_mode else validation
+            print(f"época {epoch} (passo {step}): loss={train_loss:.4f} val_loss={validation.loss:.4f} AP_val={ap} "
+                  f"({round(time.perf_counter() - epoch_started, 1)} s){' *' if improved else ''}", flush=True)
+        else:
+            print(f"época {epoch} (passo {step}, parcial, sem validação): loss={train_loss:.4f}", flush=True)
+        entry["epoch_seconds"] = round(time.perf_counter() - epoch_started, 1)
+        history.append(entry)
+        peak = round(torch.cuda.max_memory_allocated() / 2**20, 1) if device.type == "cuda" else 0.0
+        # Estado completo a cada época, com os pesos da melhor época dentro: uma queda de energia custa no máximo uma
+        # época, e best.pt é sempre derivado do last.pt já gravado (nunca o contrário).
+        atomic_torch_save({
+            "model": model.state_dict(), "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(),
+            "epoch": epoch, "step": step, "history": history, "best_metric": best_metric, "best_epoch": best_epoch,
+            "best_state": best_state, "pos_weight": pos_weight["pos_weight"], "config": config,
+            "skipped_steps": skipped_steps, "elapsed_seconds": elapsed_before + time.perf_counter() - started,
+            "peak_vram_mib": max(peak_before, peak),
+        }, last_checkpoint)
+        if improved:
+            atomic_torch_save({"model": best_state, "epoch": best_epoch, "config": config}, checkpoint)
 
-    threshold_bin = best_validation.model["all"].summary()["best_threshold"]["bin"]
+    if best_state is None:
+        raise SystemExit("Nenhuma época validada com métrica finita: não há checkpoint.")
+    if best_validation is None:
+        # A seleção foi feita em recortes (ou o run foi retomado): AP, limiar e perda de validação da melhor época
+        # são medidos agora na região de avaliação, com os pesos do checkpoint.
+        model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
+        best_validation = evaluate(model, val_loader, device, use_amp, pos_weight=pos_weight["pos_weight"])
+        val_set.close()
+    region_summary = best_validation.model["all"].summary()
+    if region_summary["average_precision"] is None:
+        raise SystemExit("Validação sem positivos na região de avaliação: AP e threshold indefinidos.")
+    best_ap = region_summary["average_precision"]
+    threshold_bin = region_summary["best_threshold"]["bin"]
+    if crops_mode:
+        validation_text = ("perda em recortes de treino aumentados da validação (1 por janela, ressorteados a cada "
+                           "época), como o oficial; AP, limiar e perda na região de avaliação só para a melhor época")
+    else:
+        validation_text = "região de avaliação inteira a cada época"
     report: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "kind": kind,
@@ -635,24 +898,42 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
             "t_in": args.t_in,
             "target": "fogo ativo binário em t+1",
             "readout": "logits[:, :, -1:] (convenção de leitura)",
-            "checkpoint_selection": "maior AP de validação",
-            "threshold_selection": "maior F2 de validação (índice de bin no histograma de logits)",
+            "recipe": args.recipe,
+            "optimization": {
+                "batch_size": args.batch_size, "accumulate": args.accumulate, "micro_batch": micro_batch,
+                "max_steps": args.max_steps, "max_epochs": args.epochs, "steps_done": step, "epochs_done": epoch,
+                "amp_skipped_steps": skipped_steps,
+                "optimizer": f"AdamW(lr={args.lr}, weight_decay={args.weight_decay})",
+                "loss": f"BCE mascarada (média por pixel avaliado), pos_weight={pos_weight['pos_weight']:.3f}",
+                "precision": "AMP fp16" if use_amp else "fp32",
+                "validation": validation_text + "; época cortada por max_steps não é validada",
+            },
+            "checkpoint_selection": "menor perda de validação" if use_loss else "maior AP de validação",
+            "val_sampling": args.val_sampling,
+            "eval_region": args.eval_region,
+            "resumed_from": resumed_from,
+            "threshold_selection": "maior F2 de validação na região de avaliação (índice de bin no histograma de logits)",
             "ap_definition": f"AP em degraus sobre histograma de logits ({FINE_BINS} bins em {LOGIT_RANGE}); "
             f"IC por bootstrap de eventos com {EVENT_BINS} bins",
             "views": {
-                "all": "todos os pixels",
+                "all": "todos os pixels da região de avaliação",
                 "crop32": "center_crop_x32 (comparável ao artigo)",
                 "new_vs_t": "pixels sem fogo em t",
                 "new_vs_window": "pixels sem fogo em t−T_in+1..t",
             },
             "baselines": BASELINES,
-            "baseline_notes": "persistência 'última passagem' usa a hora máxima de t na imagem inteira (oficial: no tensor "
-            "já recortado); difere só na vista crop32 quando o pixel de hora máxima cai fora do recorte",
+            "baseline_notes": (
+                "persistência 'última passagem' usa a hora máxima de t dentro do recorte, como o oficial"
+                if args.eval_region == "crop32" else
+                "persistência 'última passagem' usa a hora máxima de t na imagem inteira (oficial: no tensor já "
+                "recortado); difere só na vista crop32 quando o pixel de hora máxima cai fora do recorte"),
             "logit_precision": "logits calculados sob AMP (fp16) e convertidos para fp32; espaçamento ~0,004–0,008 em −5..−10",
-            "train_sampling": "1 recorte/janela/época, regra oficial de 10 sorteios, sem augmentation",
+            "train_sampling": "1 recorte/janela/época, regra oficial de 10 sorteios, " + (
+                "com flips e rotações de 90° do oficial e ângulos corrigidos no referencial da grade (γ)"
+                if args.augment else "sem augmentation"),
             "eval_tiling": f"tiles {args.patch} px com halo {args.halo} px (raio receptivo {radius}); cada pixel avaliado "
-            "uma vez; a entrada de cada tile é idêntica à da imagem inteira, mas a saída só coincide com a inferência da "
-            "imagem inteira a >= raio receptivo da borda (BatchNorm/LeakyReLU fora da imagem)",
+            "uma vez; a saída só coincide com a inferência da região inteira a >= raio receptivo da borda dela "
+            "(BatchNorm/LeakyReLU sobre o padding)",
             "channels": train_set.channel_names,
             "drop_groups": args.drop_groups,
             "determinism": determinism,
@@ -671,14 +952,17 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
         "pos_weight": pos_weight,
         "history": history,
         "best_epoch": best_epoch,
+        "best_val_loss": best_metric if use_loss else None,
+        "region_val_loss": best_validation.loss,
         "validation_threshold_bin": threshold_bin,
         "validation": best_validation.summary(threshold_bin, bootstrap=args.bootstrap),
         "checkpoint": checkpoint.relative_to(args.data_root).as_posix(),
         "checkpoint_sha256": sha256_file(checkpoint),
         "validation_per_event_counts": best_validation.save_per_event(checkpoint.parent / "validation_per_event.npz")
         .relative_to(args.data_root).as_posix(),
-        "elapsed_seconds": round(time.perf_counter() - started, 1),
-        "peak_vram_mib": round(torch.cuda.max_memory_allocated() / 2**20, 1) if device.type == "cuda" else None,
+        "elapsed_seconds": round(elapsed_before + time.perf_counter() - started, 1),
+        "peak_vram_mib": (max(peak_before, round(torch.cuda.max_memory_allocated() / 2**20, 1))
+                          if device.type == "cuda" else None),
         "resources": resource_snapshot(),
     }
     write_json(report, report_path)
@@ -745,6 +1029,18 @@ def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         demo = " É um run de demonstração (`--max-events`), que nunca avalia o teste." if (
             DEMO_REPORT_DIR / f"{args.run_name}.json").exists() else ""
         raise SystemExit(f"Não há relatório de treino completo em {report_path}.{demo}")
+    pending = pending_test_report(report_path)
+    if pending.exists():
+        staged = json.loads(pending.read_text(encoding="utf-8"))
+        stamp = (staged.get("test") or {}).get("evaluated_at_utc")
+        if stamp and any(e.get("evaluated_at_utc") == stamp for e in ledger_entries(args.ledger, args.run_name)):
+            # Caiu entre o livro-razão e a promoção: a avaliação já está registrada, falta só o relatório.
+            os.replace(pending, report_path)
+            print(f"Avaliação do teste interrompida concluída a partir de {pending.name}: "
+                  f"AP={staged['test']['metrics']['all']['model']['average_precision']}")
+            return staged
+        # Caiu antes do livro-razão: nada foi registrado, e a avaliação é refeita do zero.
+        pending.unlink()
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if report.get("kind") != "full" or not report.get("eligible_for_test"):
         raise SystemExit(
@@ -795,6 +1091,7 @@ def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         dataset = WSTSWindowDataset(
             events, normalization, mode="eval", t_in=config["t_in"], patch=config["patch"], halo=config["halo"],
             include_forecast_precip=config["include_forecast_precip"], drop_groups=config["drop_groups"],
+            eval_region=config.get("eval_region", "full"),
         )
         if model is None:
             model = build_model(len(dataset.channel_names), config["t_in"], config, device)
@@ -828,6 +1125,9 @@ def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     if split_kind == "spatiotemporal":
         report["test"]["scenarios"] = {cell: value for cell, value in measured.items() if cell != "test"}
         report["test"]["shift_decomposition"] = shift_decomposition(measured)
+    # Ordem que sobrevive a uma queda em qualquer ponto: relatório pendente (atômico) → livro-razão (fsync) →
+    # promoção do pendente. Caindo antes do livro-razão, nada foi registrado; depois dele, a próxima chamada só promove.
+    write_json(report, pending)
     args.ledger.parent.mkdir(parents=True, exist_ok=True)
     with args.ledger.open("a", encoding="utf-8") as ledger:
         ledger.write(json.dumps({
@@ -842,7 +1142,9 @@ def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             "cells_evaluated": cells,
             "test_ap": report["test"]["metrics"]["all"]["model"]["average_precision"],
         }, ensure_ascii=False) + "\n")
-    write_json(report, report_path)
+        ledger.flush()
+        os.fsync(ledger.fileno())
+    os.replace(pending, report_path)
     headline = report["test"]["metrics"]["all"]["model"]["average_precision"]
     print(f"Teste avaliado: AP={headline} | {report_path}")
     for cell, value in (report["test"].get("scenarios") or {}).items():
