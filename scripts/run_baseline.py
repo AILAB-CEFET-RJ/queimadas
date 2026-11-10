@@ -1,20 +1,22 @@
-"""Baseline: STConvS2S com a receita do artigo do dataset nos 12 folds por ano, com teste único por fold.
+"""Baseline: STConvS2S nos 12 folds por ano, com teste único por fold, na receita do artigo ou na variante dela.
 
 Protocolo (o dos modelos multitemporais do artigo, `cfgs/*/wandb_table5.yaml` e `train.py` do repositório oficial):
 cada fold oficial treina com dois anos, valida com um e testa com o quarto; o número reportado é a média e o desvio
 do AP de teste entre os 12 folds. Cada run é `stconv_train.py --recipe paper` (lote 32, 10.000 passos, AdamW
 lr 0,01, checkpoint pelo menor `val_loss` em recortes aumentados da validação, `center_crop_x32` no teste,
-`pos_weight` = 1/taxa de fogo nas imagens de treino do fold, todas as features, semente 0).
+`pos_weight` = 1/taxa de fogo nas imagens de treino do fold, todas as features, semente 0). Com `--recipe paper_es`,
+a variante com redução do lr no platô e parada antecipada; cada receita tem runs, logs e resumo próprios.
 
 O fold 2 vai primeiro: é o fold ilustrado na documentação do dataset e dá um primeiro número cedo. O executor foi
 feito para rodar dias sem supervisão:
 
 - é retomável em dois níveis: um fold com relatório completo é pulado, e um fold interrompido continua do `last.pt`
   da última época;
-- uma falha transitória (driver, memória, antivírus segurando um arquivo) ganha novas tentativas com `--resume`;
-  um fold que falha de vez fica registrado no resumo e os seguintes continuam;
-- pede ao sistema operacional para não suspender enquanto roda (`prevent_sleep`) e grava a própria saída em
-  `reports/logs/baseline_runner.log`, porque roda num processo sem console.
+- uma falha transitória (driver, memória, antivírus segurando um arquivo) ganha novas tentativas com `--resume`,
+  com esperas crescentes (a GPU às vezes só volta minutos depois de o Windows acordar); um fold que falha de vez
+  fica registrado no resumo e os seguintes continuam;
+- pede ao sistema operacional para não suspender enquanto roda (`prevent_sleep`) e grava a própria saída no log da
+  receita (`reports/logs/baseline_runner.log` ou `baseline_es_runner.log`), porque roda num processo sem console.
 
 A normalização de cada fold é ajustada só nos eventos de treino dele, na primeira vez que ele roda.
 """
@@ -46,17 +48,25 @@ from scripts.run_registry import (  # noqa: E402
 )
 
 FOLD_ORDER = (2, 0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11)
-RUN_PREFIX = "baseline_paper_f"
-DEFAULT_REPORT = REPORTS_DIR / "baseline_paper_summary.json"
+# Cada receita tem os seus nomes de run, logs e resumo: os folds de uma nunca entram na média da outra.
+# `paper_es` (2026-11-06) é a `paper` com redução do lr no platô e parada antecipada (ver `stconv_train.RECIPES`).
+RECIPE_RUNS = {
+    "paper": {"prefix": "baseline_paper_f", "summary": REPORTS_DIR / "baseline_paper_summary.json",
+              "runner_log": "baseline_runner.log"},
+    "paper_es": {"prefix": "baseline_es_f", "summary": REPORTS_DIR / "baseline_es_summary.json",
+                 "runner_log": "baseline_es_runner.log"},
+}
 TRAIN_SCRIPT = "scripts/stconv_train.py"
-TRAIN_ATTEMPTS = 3
-RETRY_PAUSE_SECONDS = 60
-# O que um relatório precisa ter para contar como fold do baseline (um run de outra receita com o mesmo nome não entra).
-EXPECTED_PROTOCOL = {"recipe": "paper", "eval_region": "crop32", "val_sampling": "train_crops", "split_kind": "temporal"}
+# Espera antes de cada nova tentativa de treino; o número de tentativas é um a mais que o de esperas.
+RETRY_PAUSES_SECONDS = (60, 300, 900)
+TRAIN_ATTEMPTS = len(RETRY_PAUSES_SECONDS) + 1
+RETRY_PAUSE_SECONDS = RETRY_PAUSES_SECONDS[0]
+# O que um relatório precisa ter, além da receita, para contar como fold do baseline.
+EXPECTED_PROTOCOL = {"eval_region": "crop32", "val_sampling": "train_crops", "split_kind": "temporal"}
 
 
-def run_name(fold: int) -> str:
-    return f"{RUN_PREFIX}{fold:02d}"
+def run_name(fold: int, recipe: str = "paper") -> str:
+    return f"{RECIPE_RUNS[recipe]['prefix']}{fold:02d}"
 
 
 class Log:
@@ -86,15 +96,15 @@ def ensure_normalization(data_root: Path, fold: int, log: Log) -> Path:
 
 
 def train_command(fold: int, args: argparse.Namespace, *, resume: bool) -> list[str]:
-    """Linha de comando do treino de um fold com a receita do artigo."""
-    command = [sys.executable, "-u", TRAIN_SCRIPT, "--recipe", "paper", "--fold", str(fold),
-               "--run-name", run_name(fold), "--accumulate", str(args.accumulate),
+    """Linha de comando do treino de um fold com a receita do executor."""
+    command = [sys.executable, "-u", TRAIN_SCRIPT, "--recipe", args.recipe, "--fold", str(fold),
+               "--run-name", run_name(fold, args.recipe), "--accumulate", str(args.accumulate),
                "--num-workers", str(args.num_workers), "--data-root", str(args.data_root)]
     return command + (["--resume"] if resume else [])
 
 
-def test_command(fold: int) -> list[str]:
-    return [sys.executable, "-u", TRAIN_SCRIPT, "--evaluate-test", "--run-name", run_name(fold)]
+def test_command(fold: int, recipe: str = "paper") -> list[str]:
+    return [sys.executable, "-u", TRAIN_SCRIPT, "--evaluate-test", "--run-name", run_name(fold, recipe)]
 
 
 def execute(command: list[str], log_path: Path) -> int:
@@ -106,16 +116,16 @@ def execute(command: list[str], log_path: Path) -> int:
         return subprocess.run(command, cwd=REPO_ROOT, stdout=stream, stderr=subprocess.STDOUT).returncode
 
 
-def read_report(fold: int, report_dir: Path = RUNS_REPORT_DIR) -> dict[str, Any] | None:
-    path = report_dir / f"{run_name(fold)}.json"
+def read_report(fold: int, report_dir: Path = RUNS_REPORT_DIR, recipe: str = "paper") -> dict[str, Any] | None:
+    path = report_dir / f"{run_name(fold, recipe)}.json"
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
-def protocol_problems(report: dict[str, Any], fold: int) -> list[str]:
+def protocol_problems(report: dict[str, Any], fold: int, recipe: str = "paper") -> list[str]:
     """Divergências entre o relatório e o protocolo do baseline; vazio quando o fold pode entrar na média."""
     protocol = report.get("protocol", {})
     problems = [f"{key}={protocol.get(key)!r} (esperado {value!r})"
-                for key, value in EXPECTED_PROTOCOL.items() if protocol.get(key) != value]
+                for key, value in {"recipe": recipe, **EXPECTED_PROTOCOL}.items() if protocol.get(key) != value]
     if protocol.get("fold") != fold:
         problems.append(f"fold={protocol.get('fold')!r} (esperado {fold})")
     if report.get("kind") != "full":
@@ -123,9 +133,9 @@ def protocol_problems(report: dict[str, Any], fold: int) -> list[str]:
     return problems
 
 
-def fold_entry(fold: int, report_dir: Path = RUNS_REPORT_DIR) -> dict[str, Any] | None:
+def fold_entry(fold: int, report_dir: Path = RUNS_REPORT_DIR, recipe: str = "paper") -> dict[str, Any] | None:
     """Resumo de um fold a partir do relatório do run, ou `None` se ele ainda não terminou o treino."""
-    report = read_report(fold, report_dir)
+    report = read_report(fold, report_dir, recipe)
     if report is None:
         return None
     test = report.get("test")
@@ -134,11 +144,14 @@ def fold_entry(fold: int, report_dir: Path = RUNS_REPORT_DIR) -> dict[str, Any] 
     repo = report.get("provenance", {}).get("repo", {})
     return {
         "fold": fold,
-        "run_name": run_name(fold),
+        "run_name": run_name(fold, recipe),
+        "recipe": recipe,
         "years": report["protocol"]["split"],
-        "protocol_problems": protocol_problems(report, fold),
+        "protocol_problems": protocol_problems(report, fold, recipe),
         "best_epoch": report["best_epoch"],
+        "epochs_done": report["protocol"]["optimization"]["epochs_done"],
         "steps_done": report["protocol"]["optimization"]["steps_done"],
+        "stop_reason": report["protocol"]["optimization"].get("stop_reason"),
         "amp_skipped_steps": report["protocol"]["optimization"].get("amp_skipped_steps"),
         "best_val_loss": report.get("best_val_loss"),
         "val_ap": report["validation"]["all"]["model"]["average_precision"],
@@ -185,12 +198,13 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def write_summary(path: Path, state: dict[str, Any]) -> dict[str, Any]:
-    entries = [entry for fold in FOLD_ORDER if (entry := fold_entry(fold)) is not None]
+def write_summary(path: Path, state: dict[str, Any], recipe: str = "paper") -> dict[str, Any]:
+    entries = [entry for fold in FOLD_ORDER if (entry := fold_entry(fold, recipe=recipe)) is not None]
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "protocol": "12 folds oficiais por ano, receita do artigo (stconv_train.py --recipe paper), teste único por fold",
-        "fold_order": list(FOLD_ORDER),
+        "recipe": recipe,
+        "protocol": f"12 folds oficiais por ano, stconv_train.py --recipe {recipe}, teste único por fold",
+        "fold_order": state.get("fold_order", list(FOLD_ORDER)),
         "folds": entries,
         "failures": state["failures"],
         "aggregate": summarize(entries),
@@ -204,11 +218,12 @@ def write_summary(path: Path, state: dict[str, Any]) -> dict[str, Any]:
 
 def run_fold(fold: int, args: argparse.Namespace, log: Log) -> str | None:
     """Treina e testa um fold; devolve `None` se terminou ou o motivo da falha."""
-    name = run_name(fold)
+    recipe = args.recipe
+    name = run_name(fold, recipe)
     fold_log = args.log_dir / f"{name}.log"
     ensure_normalization(args.data_root, fold, log)
     attempt = 0
-    while read_report(fold) is None:
+    while read_report(fold, recipe=recipe) is None:
         attempt += 1
         resume = (args.data_root / "runs" / name / "last.pt").exists()
         log(f"[treino] fold {fold}, tentativa {attempt}{' (retomando do last.pt)' if resume else ''} → {fold_log}")
@@ -217,10 +232,11 @@ def run_fold(fold: int, args: argparse.Namespace, log: Log) -> str | None:
             break
         if attempt >= TRAIN_ATTEMPTS:
             return f"treino falhou {attempt} vezes (último código {code}); veja {fold_log}"
-        log(f"  treino saiu com código {code}; nova tentativa em {RETRY_PAUSE_SECONDS} s")
-        time.sleep(RETRY_PAUSE_SECONDS)
-    report = read_report(fold) or {}
-    problems = protocol_problems(report, fold)
+        pause = RETRY_PAUSES_SECONDS[attempt - 1]
+        log(f"  treino saiu com código {code}; nova tentativa em {pause} s")
+        time.sleep(pause)
+    report = read_report(fold, recipe=recipe) or {}
+    problems = protocol_problems(report, fold, recipe)
     if problems:
         return f"o relatório {name}.json não segue o protocolo do baseline: {'; '.join(problems)}"
     if "test" not in report:
@@ -230,8 +246,8 @@ def run_fold(fold: int, args: argparse.Namespace, log: Log) -> str | None:
                     "inspecione antes de qualquer --force")
         log(f"[teste]  fold {fold}")
         for attempt in range(1, 3):
-            code = execute(test_command(fold), fold_log)
-            if code == 0 and "test" in (read_report(fold) or {}):
+            code = execute(test_command(fold, recipe), fold_log)
+            if code == 0 and "test" in (read_report(fold, recipe=recipe) or {}):
                 break
             if attempt == 2:
                 return f"avaliação do teste falhou (código {code}); veja {fold_log}"
@@ -240,15 +256,18 @@ def run_fold(fold: int, args: argparse.Namespace, log: Log) -> str | None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Roda o baseline STConvS2S (receita do artigo) nos 12 folds.")
+    parser = argparse.ArgumentParser(description="Roda o baseline STConvS2S nos 12 folds (receita do artigo ou variante).")
+    parser.add_argument("--recipe", choices=sorted(RECIPE_RUNS), default="paper",
+                        help="Receita dos runs; define nomes, logs e resumo (uma receita nunca se mistura com a outra).")
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--folds", type=int, nargs="*", default=list(FOLD_ORDER), help="Subconjunto, na ordem dada.")
     parser.add_argument("--accumulate", type=int, default=2,
                         help="Micro-lotes por passo; o lote efetivo continua 32 (2 = micro-lote 16, ~3,6 GiB de VRAM).")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-dir", type=Path, default=REPORTS_DIR / "logs")
-    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument("--report", type=Path, default=None, help="Padrão: o resumo da receita (RECIPE_RUNS).")
     args = parser.parse_args(argv)
+    args.report = args.report or RECIPE_RUNS[args.recipe]["summary"]
     # O executor e os filhos precisam enxergar o mesmo diretório, de qualquer lugar de onde forem lançados.
     if not args.data_root.is_absolute():
         args.data_root = (REPO_ROOT / args.data_root).resolve()
@@ -260,14 +279,14 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     unknown = sorted(set(args.folds) - set(FOLD_ORDER))
     if unknown:
         raise SystemExit(f"Folds inexistentes: {unknown}.")
-    log = Log(args.log_dir / "baseline_runner.log")
+    log = Log(args.log_dir / RECIPE_RUNS[args.recipe]["runner_log"])
     state: dict[str, Any] = {"started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                             "power": power_status(), "failures": {}, "guard": None}
+                             "power": power_status(), "failures": {}, "guard": None, "fold_order": list(args.folds)}
     if state["power"]["on_ac"] is False:
         log("ATENÇÃO: o computador está na bateria. Ligue na tomada antes de deixar o treino rodando.")
     with prevent_sleep() as guard:
         state["guard"] = dict(guard)
-        log(f"Início | folds {args.folds} | dados {args.data_root} | bloqueio de suspensão: "
+        log(f"Início | receita {args.recipe} | folds {args.folds} | dados {args.data_root} | bloqueio de suspensão: "
             f"{'ativo' if guard['active'] else guard.get('note', 'inativo')}")
         for fold in args.folds:
             began = time.perf_counter()
@@ -280,14 +299,14 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 log(f"  fold {fold} NÃO concluído: {failure}")
             else:
                 state["failures"].pop(str(fold), None)
-            aggregate = write_summary(args.report, state)["aggregate"]
-            done = fold_entry(fold) or {}
-            log(f"  fold {fold}: AP teste {done.get('test_ap')} | {round((time.perf_counter() - began) / 3600, 2)} h | "
+            aggregate = write_summary(args.report, state, args.recipe)["aggregate"]
+            done = fold_entry(fold, recipe=args.recipe) or {}
+            log(f"  [{args.recipe}] fold {fold}: AP teste {done.get('test_ap')} | {round((time.perf_counter() - began) / 3600, 2)} h | "
                 f"média até aqui {aggregate['test_ap_mean']} ({aggregate['n_folds_tested']} folds)")
     state["guard"] = {**state["guard"], "released": True}
-    summary = write_summary(args.report, state)
+    summary = write_summary(args.report, state, args.recipe)
     aggregate = summary["aggregate"]
-    log(f"Fim | AP de teste {aggregate['test_ap_mean']} ± {aggregate['test_ap_std']} em {aggregate['n_folds_tested']} "
+    log(f"Fim | receita {args.recipe} | AP de teste {aggregate['test_ap_mean']} ± {aggregate['test_ap_std']} em {aggregate['n_folds_tested']} "
         f"folds | falhas: {sorted(state['failures']) or 'nenhuma'} | {args.report}")
     return summary
 

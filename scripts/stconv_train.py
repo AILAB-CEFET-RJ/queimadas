@@ -82,18 +82,27 @@ VIEWS = ("all", "crop32", "new_vs_t", "new_vs_window")
 # o `val_dataset` com `is_train=True`), `center_crop_x32` no teste, `pos_weight` = 1/taxa de fogo nas imagens
 # inteiras dos anos de treino (o `train.py` oficial sobrescreve o valor dos YAML), todas as features, semente 0.
 # Qualquer argumento passado explicitamente na linha de comando vence a receita.
+#
+# `paper_es` é a `paper` com redução da taxa de aprendizado no platô e parada antecipada (decisão do usuário em
+# 2026-11-06, para caber no tempo da máquina; desvio declarado da receita do artigo): lr 0,01 dividido por √10 a cada 5
+# épocas validadas sem melhora da `val_loss`, até 0,001; o treino para depois de 15 épocas validadas sem melhora (sem
+# melhora entre os cortes, as 5 últimas já no lr mínimo) ou nos 10.000 passos, o que vier primeiro. Checkpoint, validação e teste iguais aos da `paper`.
+CONSTANT_LR = {"lr_schedule": "constant", "lr_factor": None, "lr_patience": None, "min_lr": None,
+               "early_stop_patience": None}
 RECIPES: dict[str, dict[str, Any]] = {
     "pre_registered": {
         "epochs": 20, "max_steps": None, "batch_size": 8, "accumulate": 1, "lr": 1e-3, "weight_decay": 1e-4,
         "seed": 42, "include_forecast_precip": False, "augment": False, "eval_region": "full",
-        "checkpoint_metric": "val_ap", "val_sampling": "region", "pos_weight_source": "crops",
+        "checkpoint_metric": "val_ap", "val_sampling": "region", "pos_weight_source": "crops", **CONSTANT_LR,
     },
     "paper": {
         "epochs": None, "max_steps": 10_000, "batch_size": 32, "accumulate": 1, "lr": 1e-2, "weight_decay": 1e-2,
         "seed": 0, "include_forecast_precip": True, "augment": True, "eval_region": "crop32",
-        "checkpoint_metric": "val_loss", "val_sampling": "train_crops", "pos_weight_source": "fire_rate",
+        "checkpoint_metric": "val_loss", "val_sampling": "train_crops", "pos_weight_source": "fire_rate", **CONSTANT_LR,
     },
 }
+RECIPES["paper_es"] = {**RECIPES["paper"], "lr_schedule": "plateau", "lr_factor": 10 ** -0.5, "lr_patience": 5,
+                       "min_lr": 1e-3, "early_stop_patience": 15}
 CHECKPOINT_METRICS = ("val_ap", "val_loss")
 # Não definem o run: mudar entre a queda e a retomada é permitido (e não entra na impressão digital do last.pt).
 RESUME_VOLATILE = frozenset({"resume", "num_workers", "force", "report", "ledger", "eval_batch_size", "bootstrap"})
@@ -381,6 +390,55 @@ def train_one_epoch(
     return {"losses": losses, "step": step, "epoch_complete": complete, "skipped_steps": skipped, "batches": batches}
 
 
+class PlateauSchedule:
+    """Taxa de aprendizado reduzida no platô da métrica de checkpoint, com parada antecipada.
+
+    Só épocas validadas contam, e "melhora" é a mesma do checkpoint (estrita, métrica finita). Depois de
+    `patience` épocas seguidas sem melhora desde a última melhora ou redução, o lr é multiplicado por `factor`, sem
+    descer de `min_lr`. O treino para quando `stop_patience` épocas seguidas passam sem melhora. Sem torch: o lr é
+    aplicado ao otimizador por quem chama, e o estado vai inteiro para o `last.pt`.
+    """
+
+    def __init__(self, lr: float, factor: float, patience: int, min_lr: float, stop_patience: int) -> None:
+        if not (0 < factor < 1 and patience >= 1 and stop_patience >= 1 and 0 < min_lr <= lr):
+            raise ValueError("cronograma de lr inválido")
+        self.lr, self.factor, self.patience, self.min_lr, self.stop_patience = lr, factor, patience, min_lr, stop_patience
+        self.bad_epochs = 0
+        self.epochs_since_best = 0
+        self.reductions: list[dict[str, Any]] = []
+
+    def update(self, epoch: int, improved: bool) -> dict[str, Any]:
+        """Registra uma época validada; devolve o lr para a próxima época e se o treino deve parar."""
+        if improved:
+            self.bad_epochs = self.epochs_since_best = 0
+        else:
+            self.bad_epochs += 1
+            self.epochs_since_best += 1
+            if self.bad_epochs >= self.patience and self.lr > self.min_lr:
+                # Arredondado para o lr mínimo não sair 0,000999… por erro de ponto flutuante.
+                self.lr = max(round(self.lr * self.factor, 12), self.min_lr)
+                self.bad_epochs = 0
+                self.reductions.append({"after_epoch": epoch, "lr": self.lr})
+        return {"lr": self.lr, "stop": self.epochs_since_best >= self.stop_patience}
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"lr": self.lr, "bad_epochs": self.bad_epochs, "epochs_since_best": self.epochs_since_best,
+                "reductions": list(self.reductions)}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self.lr, self.bad_epochs = state["lr"], state["bad_epochs"]
+        self.epochs_since_best, self.reductions = state["epochs_since_best"], list(state["reductions"])
+
+
+def apply_schedule(optimizer: Any, schedule: PlateauSchedule, epoch: int, improved: bool) -> dict[str, Any]:
+    """Atualiza o cronograma com uma época validada e aplica o lr resultante a todos os grupos do otimizador."""
+    previous = optimizer.param_groups[0]["lr"]
+    decision = schedule.update(epoch, improved)
+    for group in optimizer.param_groups:
+        group["lr"] = decision["lr"]
+    return {**decision, "reduced": decision["lr"] != previous}
+
+
 def atomic_torch_save(payload: dict[str, Any], path: Path) -> None:
     import torch
 
@@ -390,6 +448,17 @@ def atomic_torch_save(payload: dict[str, Any], path: Path) -> None:
 def config_fingerprint(config: dict[str, Any]) -> dict[str, Any]:
     """O que define o run: tudo menos o que só muda a infraestrutura ou a forma de chamar."""
     return {k: v for k, v in config.items() if k not in RESUME_VOLATILE}
+
+
+def config_changes(recorded: dict[str, Any], current: dict[str, Any]) -> list[str]:
+    """Chaves da configuração que mudaram entre o `last.pt` e agora.
+
+    Um `last.pt` gravado antes de existirem as chaves do cronograma de lr é lido como lr constante, que era o único
+    comportamento possível então: assim um run da receita `paper` iniciado com o código antigo continua retomável.
+    """
+    recorded = {**CONSTANT_LR, **config_fingerprint(recorded)}
+    current = config_fingerprint(current)
+    return sorted(k for k in set(recorded) | set(current) if recorded.get(k) != current.get(k))
 
 
 def estimate_pos_weight(dataset: WSTSWindowDataset, max_samples: int, seed: int) -> dict[str, Any]:
@@ -515,6 +584,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pos-weight-source", choices=("crops", "fire_rate"), default=None,
                         help="`crops`: neg/pos nos recortes de treino. `fire_rate`: 1/taxa de fogo nas imagens inteiras "
                              "dos eventos de treino, como o oficial (receita).")
+    parser.add_argument("--lr-schedule", choices=("constant", "plateau"), default=None,
+                        help="`plateau`: reduz o lr quando a métrica de checkpoint para de melhorar (receita).")
+    parser.add_argument("--lr-factor", type=float, default=None, help="Multiplicador do lr a cada redução (receita).")
+    parser.add_argument("--lr-patience", type=int, default=None,
+                        help="Épocas validadas sem melhora antes de reduzir o lr (receita).")
+    parser.add_argument("--min-lr", type=float, default=None, help="Piso do lr (receita).")
+    parser.add_argument("--early-stop-patience", type=int, default=None,
+                        help="Para depois de N épocas validadas sem melhora (receita; só com --lr-schedule plateau).")
     parser.add_argument("--resume", action="store_true", help="Retoma o treino de <data-root>/runs/<run>/last.pt.")
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--hidden-dim", type=int, default=32)
@@ -545,6 +622,16 @@ def apply_recipe(args: argparse.Namespace) -> argparse.Namespace:
         raise SystemExit("Defina --epochs ou --max-steps.")
     if args.accumulate < 1 or args.batch_size % args.accumulate:
         raise SystemExit(f"--batch-size {args.batch_size} precisa ser múltiplo de --accumulate {args.accumulate}.")
+    plateau = (args.lr_factor, args.lr_patience, args.min_lr, args.early_stop_patience)
+    if args.lr_schedule == "plateau":
+        try:
+            PlateauSchedule(args.lr, *plateau)
+        except (TypeError, ValueError):
+            raise SystemExit("--lr-schedule plateau exige --lr-factor em (0, 1), --lr-patience >= 1, "
+                             "0 < --min-lr <= --lr e --early-stop-patience >= 1.") from None
+    elif any(value is not None for value in plateau):
+        raise SystemExit("--lr-factor, --lr-patience, --min-lr e --early-stop-patience só valem com --lr-schedule plateau "
+                         "(para lr constante use --recipe paper, não --recipe paper_es --lr-schedule constant).")
     return args
 
 
@@ -752,14 +839,15 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     use_loss = args.checkpoint_metric == "val_loss"
 
+    schedule = (PlateauSchedule(args.lr, args.lr_factor, args.lr_patience, args.min_lr, args.early_stop_patience)
+                if args.lr_schedule == "plateau" else None)
     history: list[dict[str, Any]] = []
     best_metric, best_epoch, best_state, best_validation = None, None, None, None
-    epoch, step, skipped_steps, resumed_from = 0, 0, 0, None
+    epoch, step, skipped_steps, resumed_from, stop_reason = 0, 0, 0, None, None
     elapsed_before, peak_before = 0.0, 0.0
     if args.resume:
         state = torch.load(last_checkpoint, map_location="cpu", weights_only=False)
-        recorded, current = config_fingerprint(state["config"]), config_fingerprint(config)
-        changed = sorted(k for k in set(recorded) | set(current) if recorded.get(k) != current.get(k))
+        changed = config_changes(state["config"], config)
         if changed:
             raise SystemExit(f"O last.pt foi gravado com outra configuração ({', '.join(changed)}); não dá para retomar.")
         if state["pos_weight"] != pos_weight["pos_weight"]:
@@ -770,13 +858,18 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
         epoch, step, history = state["epoch"], state["step"], state["history"]
         best_metric, best_epoch, best_state = state["best_metric"], state["best_epoch"], state["best_state"]
         skipped_steps, elapsed_before, peak_before = state["skipped_steps"], state["elapsed_seconds"], state["peak_vram_mib"]
+        if schedule is not None:
+            # O lr em vigor volta junto com o estado do otimizador; o cronograma volta com os contadores de platô.
+            schedule.load_state_dict(state["lr_schedule"])
+        stop_reason = state.get("stop_reason")
         if best_state is not None:
             # O best.pt é derivado do last.pt: regravá-lo garante que os dois contam a mesma história.
             atomic_torch_save({"model": best_state, "epoch": best_epoch, "config": config}, checkpoint)
         resumed_from = {"epoch": epoch, "step": step}
         print(f"Retomando depois da época {epoch} (passo {step}).", flush=True)
     started = time.perf_counter()
-    while (args.epochs is None or epoch < args.epochs) and (args.max_steps is None or step < args.max_steps):
+    while (stop_reason is None and (args.epochs is None or epoch < args.epochs)
+           and (args.max_steps is None or step < args.max_steps)):
         epoch += 1
         train_set.set_epoch(epoch)
         # Ordem do embaralhamento função só de (semente, época): retomar reproduz a época que faltava.
@@ -798,6 +891,8 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
         entry: dict[str, Any] = {"epoch": epoch, "step": step, "train_loss": train_loss,
                                  "epoch_complete": result["epoch_complete"], "validated": validate,
                                  "train_seconds": round(train_seconds, 1)}
+        if schedule is not None:
+            entry["lr"] = optimizer.param_groups[0]["lr"]
         improved = False
         if validate:
             if crops_mode:
@@ -838,8 +933,17 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
                 best_metric, best_epoch = metric, epoch
                 best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
                 best_validation = None if crops_mode else validation
+            lr_note = ""
+            if schedule is not None:
+                decision = apply_schedule(optimizer, schedule, epoch, improved)
+                lr_note = f" [lr {entry['lr']:.2e}{' → ' + format(decision['lr'], '.2e') if decision['reduced'] else ''}]"
+                if decision["stop"]:
+                    stop_reason = (f"{schedule.stop_patience} épocas validadas sem melhora da {args.checkpoint_metric} "
+                                   f"(melhor na época {best_epoch})")
             print(f"época {epoch} (passo {step}): loss={train_loss:.4f} val_loss={validation.loss:.4f} AP_val={ap} "
-                  f"({round(time.perf_counter() - epoch_started, 1)} s){' *' if improved else ''}", flush=True)
+                  f"({round(time.perf_counter() - epoch_started, 1)} s){' *' if improved else ''}{lr_note}", flush=True)
+            if stop_reason:
+                print(f"Parada antecipada: {stop_reason}.", flush=True)
         else:
             print(f"época {epoch} (passo {step}, parcial, sem validação): loss={train_loss:.4f}", flush=True)
         entry["epoch_seconds"] = round(time.perf_counter() - epoch_started, 1)
@@ -853,6 +957,7 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
             "best_state": best_state, "pos_weight": pos_weight["pos_weight"], "config": config,
             "skipped_steps": skipped_steps, "elapsed_seconds": elapsed_before + time.perf_counter() - started,
             "peak_vram_mib": max(peak_before, peak),
+            "lr_schedule": schedule.state_dict() if schedule is not None else None, "stop_reason": stop_reason,
         }, last_checkpoint)
         if improved:
             atomic_torch_save({"model": best_state, "epoch": best_epoch, "config": config}, checkpoint)
@@ -904,6 +1009,14 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
                 "max_steps": args.max_steps, "max_epochs": args.epochs, "steps_done": step, "epochs_done": epoch,
                 "amp_skipped_steps": skipped_steps,
                 "optimizer": f"AdamW(lr={args.lr}, weight_decay={args.weight_decay})",
+                "lr_schedule": "constante" if schedule is None else (
+                    f"redução no platô da {args.checkpoint_metric}: ×{args.lr_factor:.4g} a cada {args.lr_patience} "
+                    f"épocas validadas sem melhora, piso {args.min_lr:g}; parada após {args.early_stop_patience} "
+                    "épocas validadas sem melhora ou em max_steps"),
+                "lr_reductions": schedule.reductions if schedule is not None else [],
+                "final_lr": optimizer.param_groups[0]["lr"],
+                "stop_reason": stop_reason or ("max_steps" if args.max_steps is not None and step >= args.max_steps
+                                               else "max_epochs"),
                 "loss": f"BCE mascarada (média por pixel avaliado), pos_weight={pos_weight['pos_weight']:.3f}",
                 "precision": "AMP fp16" if use_amp else "fp32",
                 "validation": validation_text + "; época cortada por max_steps não é validada",

@@ -171,6 +171,22 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual((args.augment, args.eval_region, args.checkpoint_metric), (False, "full", "val_ap"))
         self.assertFalse(args.include_forecast_precip)
 
+    def test_paper_es_is_the_paper_recipe_plus_plateau_lr_and_early_stopping(self) -> None:
+        paper, es = vars(train.parse_args(["--recipe", "paper"])), vars(train.parse_args(["--recipe", "paper_es"]))
+        schedule_keys = set(train.CONSTANT_LR)
+        self.assertEqual({k: v for k, v in paper.items() if k not in schedule_keys | {"recipe"}},
+                         {k: v for k, v in es.items() if k not in schedule_keys | {"recipe"}})
+        self.assertEqual({k: paper[k] for k in schedule_keys}, train.CONSTANT_LR)
+        self.assertEqual((es["lr_schedule"], es["lr_patience"], es["min_lr"], es["early_stop_patience"]),
+                         ("plateau", 5, 1e-3, 15))
+        self.assertAlmostEqual(es["lr_factor"] ** 2, 0.1)
+
+    def test_schedule_arguments_need_the_plateau_schedule(self) -> None:
+        with self.assertRaises(SystemExit):
+            train.parse_args(["--recipe", "paper", "--early-stop-patience", "3"])
+        with self.assertRaises(SystemExit):
+            train.parse_args(["--recipe", "paper_es", "--min-lr", "0.1"])  # piso acima do lr inicial
+
     def test_explicit_arguments_win_and_accumulation_must_divide_the_batch(self) -> None:
         args = train.parse_args(["--recipe", "paper", "--accumulate", "2", "--no-augment", "--max-steps", "5"])
         self.assertEqual((args.accumulate, args.augment, args.max_steps, args.batch_size), (2, False, 5, 32))
@@ -236,6 +252,42 @@ class BaselineRunnerTests(unittest.TestCase):
         self.assertTrue(all("--resume" in c for c in calls[: baseline.TRAIN_ATTEMPTS]))
         self.assertEqual(sorted(summary["failures"]), ["0", "2"])
 
+    def test_each_recipe_has_its_own_runs_logs_and_summary(self) -> None:
+        paper, es = baseline.parse_args([]), baseline.parse_args(["--recipe", "paper_es"])
+        self.assertNotEqual(paper.report, es.report)
+        command = baseline.train_command(5, es, resume=False)
+        self.assertEqual(command[command.index("--recipe") + 1], "paper_es")
+        self.assertEqual(command[command.index("--run-name") + 1], "baseline_es_f05")
+        self.assertEqual(baseline.test_command(5, "paper_es")[-1], "baseline_es_f05")
+        prefixes = [entry["prefix"] for entry in baseline.RECIPE_RUNS.values()]
+        self.assertFalse(any(a != b and a.startswith(b) for a in prefixes for b in prefixes))  # globs não se cruzam
+        runner_logs = [entry["runner_log"] for entry in baseline.RECIPE_RUNS.values()]
+        self.assertEqual(len(set(runner_logs)), len(runner_logs))
+        self.assertFalse(any(log.startswith(prefix) for log in runner_logs for prefix in prefixes))
+
+    # O painel é ferramenta local e não vai na exportação; lá o teste não tem o que conferir.
+    @unittest.skipUnless((Path(__file__).resolve().parents[1] / "scripts" / "baseline_status.py").exists(),
+                         "painel de acompanhamento só existe na cópia local")
+    def test_status_panel_matches_the_recipes_without_importing_torch(self) -> None:
+        code = ("import json, sys; from scripts import baseline_status as s; "
+                "print(json.dumps(['torch' in sys.modules, s.EARLY_STOP_PATIENCE, sorted(s.RECIPES)]))")
+        out = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(out.stdout), [False, train.RECIPES["paper_es"]["early_stop_patience"],
+                                                  sorted(baseline.RECIPE_RUNS)])
+
+    def test_retries_wait_longer_each_time(self) -> None:
+        self.assertEqual(baseline.TRAIN_ATTEMPTS, len(baseline.RETRY_PAUSES_SECONDS) + 1)
+        self.assertEqual(list(baseline.RETRY_PAUSES_SECONDS), sorted(baseline.RETRY_PAUSES_SECONDS))
+
+    def test_a_fold_of_one_recipe_never_counts_for_the_other(self) -> None:
+        report = {"kind": "full", "protocol": {"recipe": "paper", "eval_region": "crop32",
+                                                "val_sampling": "train_crops", "split_kind": "temporal", "fold": 5}}
+        self.assertEqual(baseline.protocol_problems(report, 5, "paper"), [])
+        self.assertTrue(baseline.protocol_problems(report, 5, "paper_es"))
+        report["protocol"]["recipe"] = "paper_es"
+        self.assertEqual(baseline.protocol_problems(report, 5, "paper_es"), [])
+        self.assertTrue(baseline.protocol_problems(report, 5, "paper"))
+
     def test_runner_does_not_import_torch(self) -> None:
         code = "import sys; import scripts.run_baseline; print('torch' in sys.modules)"
         out = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, check=True)
@@ -300,6 +352,67 @@ class TrainingLoopTests(unittest.TestCase):
     def test_config_fingerprint_ignores_only_infrastructure(self) -> None:
         base = {"lr": 0.01, "accumulate": 2, "num_workers": 4, "resume": True}
         self.assertEqual(train.config_fingerprint(base), {"lr": 0.01, "accumulate": 2})
+
+    def test_a_last_pt_from_before_the_lr_schedule_still_resumes_as_constant_lr(self) -> None:
+        paper = vars(train.parse_args(["--recipe", "paper"]))
+        legacy = {k: v for k, v in paper.items() if k not in train.CONSTANT_LR}  # last.pt gravado pelo código antigo
+        self.assertEqual(train.config_changes(legacy, paper), [])
+        es = vars(train.parse_args(["--recipe", "paper_es"]))
+        self.assertIn("lr_schedule", train.config_changes(legacy, es))
+        self.assertIn("recipe", train.config_changes(paper, es))
+
+
+class PlateauScheduleTests(unittest.TestCase):
+    @staticmethod
+    def _schedule() -> train.PlateauSchedule:
+        return train.PlateauSchedule(0.01, 10 ** -0.5, patience=5, min_lr=1e-3, stop_patience=15)
+
+    def test_lr_goes_down_by_sqrt10_every_five_flat_epochs_to_the_floor_then_stops(self) -> None:
+        schedule = self._schedule()
+        lrs, stops = [], []
+        for epoch in range(1, 16):
+            decision = schedule.update(epoch, improved=False)
+            lrs.append(decision["lr"]), stops.append(decision["stop"])
+        self.assertEqual(lrs[:4], [0.01] * 4)
+        self.assertAlmostEqual(lrs[4], 0.01 * 10 ** -0.5)       # após 5 épocas sem melhora
+        self.assertEqual(lrs[9:], [1e-3] * 6)                    # piso exato após 10, sem resíduo de ponto flutuante
+        self.assertEqual(stops, [False] * 14 + [True])           # 15 épocas sem melhora, 5 delas já no piso
+        self.assertEqual([r["after_epoch"] for r in schedule.reductions], [5, 10])
+
+    def test_an_improvement_resets_both_counters_but_keeps_the_reduced_lr(self) -> None:
+        schedule = self._schedule()
+        for epoch in range(1, 6):
+            schedule.update(epoch, improved=False)
+        reduced = schedule.lr
+        decision = schedule.update(6, improved=True)
+        self.assertEqual((decision["lr"], decision["stop"]), (reduced, False))
+        for epoch in range(7, 21):
+            self.assertFalse(schedule.update(epoch, improved=False)["stop"])
+        self.assertTrue(schedule.update(21, improved=False)["stop"])
+
+    def test_the_lr_reaches_every_param_group_and_survives_the_optimizer_state(self) -> None:
+        import torch
+
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW([{"params": [model.weight]}, {"params": [model.bias]}], lr=0.01)
+        schedule = self._schedule()
+        reductions = [epoch for epoch in range(1, 11)
+                      if train.apply_schedule(optimizer, schedule, epoch, improved=False)["reduced"]]
+        self.assertEqual(reductions, [5, 10])
+        self.assertEqual([g["lr"] for g in optimizer.param_groups], [1e-3, 1e-3])
+        restored = torch.optim.AdamW([{"params": [model.weight]}, {"params": [model.bias]}], lr=0.01)
+        restored.load_state_dict(optimizer.state_dict())  # o que a retomada faz com o last.pt
+        self.assertEqual([g["lr"] for g in restored.param_groups], [schedule.lr] * 2)
+
+    def test_state_round_trip_continues_exactly(self) -> None:
+        a = self._schedule()
+        for epoch in range(1, 8):
+            a.update(epoch, improved=epoch == 2)
+        b = self._schedule()
+        b.load_state_dict(json.loads(json.dumps(a.state_dict())))  # vai e volta pelo last.pt
+        for epoch in range(8, 25):
+            self.assertEqual(a.update(epoch, improved=False), b.update(epoch, improved=False))
+        self.assertEqual(a.state_dict(), b.state_dict())
 
 
 class DurabilityTests(unittest.TestCase):

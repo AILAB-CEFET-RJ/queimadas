@@ -15,7 +15,7 @@ O pipeline cobre três frentes:
 
 Os resultados (JSON, figuras e relatórios) ficam fora do Git, em `reports/`, e são regenerados pelo pipeline. Os
 notebooks são a exceção: vão versionados com as saídas da execução de referência, para que a análise possa ser
-lida sem baixar os dados.
+lida sem baixar os dados. A página do baseline em `docs/` também vai versionada, pelo mesmo motivo.
 
 ## Estrutura
 
@@ -25,6 +25,7 @@ lida sem baixar os dados.
 | [`tests/`](tests/) | Testes (`python -m unittest discover -s tests -t .`) |
 | [`notebooks/`](notebooks/) | Notebooks somente leitura, gerados pelos builders a partir de `reports/` |
 | [`config/splits/`](config/splits/) | Definições de split versionadas; o treino confere o split recomputado contra elas |
+| [`docs/`](docs/) | Página HTML autocontida com o baseline STConvS2S nos 12 folds e a comparação com o artigo do dataset |
 | `reports/` | Saídas geradas localmente (fora do Git) |
 
 ## Instalação
@@ -81,6 +82,8 @@ python scripts/build_eda_notebook.py
 
 # 4. STConvS2S — baseline com a receita do artigo do dataset nos 12 folds (retomável; ~3 dias numa GPU de 6 GB)
 python scripts/run_baseline.py
+#    variante da receita: redução do lr no platô e parada antecipada (runs e resumo próprios: baseline_es_*)
+python scripts/run_baseline.py --recipe paper_es
 #    medir o custo por época ANTES de ver qualquer métrica
 python scripts/stconv_train.py --recipe paper --accumulate 2 --timing-only --run-name tempo
 #    os 9 runs pré-registrados (retomável; avalia o teste uma vez ao fim de cada run, salvo com --skip-test)
@@ -129,6 +132,12 @@ semente 0. Como no oficial, o checkpoint é o de menor `val_loss` medido em reco
 validação, ressorteados a cada época, e o teste usa o `center_crop_x32`. A perda é BCE com o peso da classe
 positiva = 1/(taxa de pixels com fogo nas imagens de treino do fold), a regra que o `train.py` oficial aplica a
 todo run; o relatório de cada fold registra o valor calculado e o da tabela oficial.
+
+`run_baseline.py --recipe paper_es` roda a variante `paper_es` da receita: o lr de 0,01 é dividido por √10
+a cada 5 épocas sem melhora da `val_loss` até 0,001, e o treino para depois de 15 épocas sem melhora (ou nos
+10.000 passos). É um desvio declarado da receita do artigo, adotado para caber no tempo de uma GPU de 6 GB; os runs
+(`baseline_es_fNN`), os logs e o resumo (`reports/baseline_es_summary.json`) ficam separados dos da receita
+`paper`, e as duas nunca entram na mesma média.
 
 Diferenças em relação ao repositório oficial, todas deliberadas:
 
