@@ -17,6 +17,9 @@ Os resultados (JSON, figuras e relatórios) ficam fora do Git, em `reports/`, e 
 notebooks são a exceção: vão versionados com as saídas da execução de referência, para que a análise possa ser
 lida sem baixar os dados. A página do baseline em `docs/` também vai versionada, pelo mesmo motivo.
 
+**Rodar tudo com um comando** (download, conversão e treino, retomável e sem supervisão): veja
+[`COMO_RODAR.md`](COMO_RODAR.md).
+
 ## Estrutura
 
 | Pasta | Conteúdo |
@@ -37,6 +40,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements-lock.txt # ou requirements.txt, só com as dependências diretas
 pip install -r requirements-cuda.txt # GPU NVIDIA (driver >= 560); sem GPU: requirements-cpu.txt
+# RTX 50xx (sm_120): requirements-cuda130.txt no lugar do requirements-cuda.txt (driver >= 580)
 ```
 
 ### Repositórios de terceiros
@@ -62,6 +66,10 @@ A semântica dos canais foi verificada no repositório de criação do dataset,
 
 Os comandos rodam a partir da raiz do repositório. Os dados ficam em `dados_geoespaciais/wildfirespreadts/`
 (fora do Git); a raiz é configurável por `--data-root` ou pela variável `WSTS_DATA_ROOT`.
+
+O caminho completo do baseline e dos experimentos (clones, download, conversão, treino e pacote de resultados) também
+roda num comando só, `python scripts/run_pipeline.py`, descrito em [`COMO_RODAR.md`](COMO_RODAR.md). Os passos
+abaixo são as etapas separadas.
 
 ```bash
 # 0. Ambiente registrado (versões, GPU, commits dos clones)

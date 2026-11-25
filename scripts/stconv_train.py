@@ -104,8 +104,11 @@ RECIPES: dict[str, dict[str, Any]] = {
 RECIPES["paper_es"] = {**RECIPES["paper"], "lr_schedule": "plateau", "lr_factor": 10 ** -0.5, "lr_patience": 5,
                        "min_lr": 1e-3, "early_stop_patience": 15}
 CHECKPOINT_METRICS = ("val_ap", "val_loss")
+# Chaves que não existiam quando runs antigos gravaram o `last.pt`, com o valor que reproduz o comportamento de então.
+LEGACY_CONFIG_DEFAULTS = {**CONSTANT_LR, "test_adjustment": 0}
 # Não definem o run: mudar entre a queda e a retomada é permitido (e não entra na impressão digital do last.pt).
-RESUME_VOLATILE = frozenset({"resume", "num_workers", "force", "report", "ledger", "eval_batch_size", "bootstrap"})
+RESUME_VOLATILE = frozenset({"resume", "num_workers", "force", "report", "ledger", "eval_batch_size", "bootstrap",
+                             "require_cuda"})
 # Semente dos recortes de validação, separada da do treino para que os dois não sorteiem os mesmos recortes.
 VALIDATION_CROP_SEED_OFFSET = 7_919
 BASELINES = {"persistence_all_detections_t": "fire_t", "persistence_last_pass_t": "fire_last_t", "persistence_window_union": "fire_window"}
@@ -456,7 +459,7 @@ def config_changes(recorded: dict[str, Any], current: dict[str, Any]) -> list[st
     Um `last.pt` gravado antes de existirem as chaves do cronograma de lr é lido como lr constante, que era o único
     comportamento possível então: assim um run da receita `paper` iniciado com o código antigo continua retomável.
     """
-    recorded = {**CONSTANT_LR, **config_fingerprint(recorded)}
+    recorded = {**LEGACY_CONFIG_DEFAULTS, **config_fingerprint(recorded)}
     current = config_fingerprint(current)
     return sorted(k for k in set(recorded) | set(current) if recorded.get(k) != current.get(k))
 
@@ -558,6 +561,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "amostra, logo um teto otimista) para fechar a interação dos deslocamentos.")
     parser.add_argument("--normalization", type=Path, default=None, help="Padrão: <data-root>/stats/fold<F>_train_normalization.json")
     parser.add_argument("--t-in", type=int, default=DEFAULT_T_IN)
+    parser.add_argument("--test-adjustment", type=int, default=0,
+                        help="`n_leading_observations_test_adjustment` do oficial: no teste, pula os primeiros "
+                             "(N − T_in) dias de cada evento, para que modelos com T_in diferentes sejam avaliados nos "
+                             "mesmos dias-alvo. Só o teste; treino e validação usam todas as janelas, como no oficial. "
+                             "0 = sem ajuste (runs do baseline, em que T_in = 5 já coincide com o ajuste 5).")
     parser.add_argument("--patch", type=int, default=DEFAULT_PATCH)
     parser.add_argument("--halo", type=int, default=DEFAULT_HALO)
     parser.add_argument("--recipe", choices=sorted(RECIPES), default="pre_registered",
@@ -605,6 +613,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Demonstração: usa só os N primeiros eventos de cada ano. Inelegível para o teste.")
     parser.add_argument("--timing-only", action="store_true", help="Mede 1 época no conjunto completo; inelegível para o teste.")
     parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--require-cuda", action="store_true",
+                        help="Aborta se o torch não enxergar CUDA, em vez de cair em silêncio para a CPU (os executores "
+                             "passam por padrão desde 2026-11-18, depois que dois folds rodaram na CPU sem aviso).")
     parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument("--evaluate-test", action="store_true", help="Não treina: avalia o teste do run --run-name.")
     parser.add_argument("--force", action="store_true", help="Permite sobrescrever relatório/reavaliar teste (registrado).")
@@ -620,6 +631,10 @@ def apply_recipe(args: argparse.Namespace) -> argparse.Namespace:
             setattr(args, name, value)
     if args.epochs is None and args.max_steps is None:
         raise SystemExit("Defina --epochs ou --max-steps.")
+    if args.test_adjustment and args.test_adjustment < args.t_in:
+        raise SystemExit(f"--test-adjustment {args.test_adjustment} precisa ser 0 ou >= --t-in {args.t_in}.")
+    if args.require_cuda and args.cpu:
+        raise SystemExit("--require-cuda e --cpu são incompatíveis.")
     if args.accumulate < 1 or args.batch_size % args.accumulate:
         raise SystemExit(f"--batch-size {args.batch_size} precisa ser múltiplo de --accumulate {args.accumulate}.")
     plateau = (args.lr_factor, args.lr_patience, args.min_lr, args.early_stop_patience)
@@ -749,6 +764,20 @@ def resolve_pos_weight(
     }
 
 
+def select_device(args: argparse.Namespace) -> Any:
+    """CUDA se disponível (e não `--cpu`); com `--require-cuda`, sem CUDA é erro em vez de CPU silenciosa."""
+    import torch
+
+    if args.cpu:
+        return torch.device("cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if getattr(args, "require_cuda", False):
+        raise SystemExit("--require-cuda: o torch não enxerga nenhuma GPU (torch.cuda.is_available() é False; "
+                         f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}). Confira o nvidia-smi.")
+    return torch.device("cpu")
+
+
 def run_training(args: argparse.Namespace) -> dict[str, Any]:
     import torch
 
@@ -788,7 +817,7 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
         args.epochs, args.max_steps = 1, None
     check_resources(min_available_ram_gib=0.5, min_disk_free_gib=2)
     determinism = configure_determinism(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
+    device = select_device(args)
     use_amp = device.type == "cuda"
     radius = receptive_radius(args.num_layers)
     if args.halo < radius:
@@ -1001,6 +1030,7 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
                 "espacial, ambos avaliados com este mesmo modelo"
             ) if args.split_kind == "spatiotemporal" else "anos disjuntos; regiões compartilhadas",
             "t_in": args.t_in,
+            "test_adjustment": args.test_adjustment,
             "target": "fogo ativo binário em t+1",
             "readout": "logits[:, :, -1:] (convenção de leitura)",
             "recipe": args.recipe,
@@ -1131,6 +1161,17 @@ def shift_decomposition(measured: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def resolve_test_skip(config: dict[str, Any]) -> dict[str, Any]:
+    """Quantos dias iniciais de cada evento o teste pula (`n_leading_observations_test_adjustment` do oficial).
+
+    Com ajuste N e entrada T_in, a primeira janela de teste começa no dia N − T_in, e o primeiro alvo é sempre o dia N:
+    os modelos de 1 e de 5 dias passam a ser medidos nos mesmos dias-alvo (alinhamento exato só sem lacunas de datas,
+    ver `valid_window_starts`). Runs sem a chave (todo o baseline) não pulam nada.
+    """
+    adjustment = int(config.get("test_adjustment") or 0)
+    return {"adjustment": adjustment, "skip_initial": max(0, adjustment - config["t_in"]) if adjustment else 0}
+
+
 def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     """Avalia o teste uma vez a partir do checkpoint e do threshold de validação de um run."""
     if args.max_windows is not None:
@@ -1177,7 +1218,7 @@ def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     config = report["config"]
     check_resources(min_available_ram_gib=0.5, min_disk_free_gib=1)
     configure_determinism(config["seed"])
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
+    device = select_device(args)
     use_amp = device.type == "cuda"
     split_kind = config.get("split_kind", "temporal")
     normalization = json.loads(normalization_path.read_text(encoding="utf-8"))
@@ -1199,12 +1240,13 @@ def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     evaluated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     stamp = evaluated_at[:19].replace(":", "")
     measured: dict[str, Any] = {}
+    adjustment = resolve_test_skip(config)
     for cell in cells:
         events = spec.events[cell]
         dataset = WSTSWindowDataset(
             events, normalization, mode="eval", t_in=config["t_in"], patch=config["patch"], halo=config["halo"],
             include_forecast_precip=config["include_forecast_precip"], drop_groups=config["drop_groups"],
-            eval_region=config.get("eval_region", "full"),
+            eval_region=config.get("eval_region", "full"), skip_initial=adjustment["skip_initial"],
         )
         if model is None:
             model = build_model(len(dataset.channel_names), config["t_in"], config, device)
@@ -1230,6 +1272,7 @@ def run_test_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         "split_kind": split_kind,
         "events": measured["test"]["events"],
         "n_test_windows": measured["test"]["n_windows"],
+        "test_adjustment": adjustment,
         "threshold_bin_from_validation": threshold_bin,
         "metrics": measured["test"]["metrics"],
         "per_event_counts": measured["test"]["per_event_counts"],
