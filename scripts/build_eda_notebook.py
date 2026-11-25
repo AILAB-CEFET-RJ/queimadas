@@ -115,10 +115,12 @@ def build() -> nbformat.NotebookNode:
             - **Pegada dos eventos** — onde cada incêndio aconteceu e a que conjunto ele pertence. A sobreposição
               entre cores é a evidência visual de que o split por ano **não** separa regiões: 96% dos eventos de
               teste caem sobre a pegada de algum evento de treino.
-            - **Atividade de fogo** — quanto cada evento queimou. A contagem de pixels de fogo é o alvo, então o
-              mapa exclui **toda célula de avaliação de qualquer protocolo** (o ano de teste do fold, o teste
-              espacial e as três células do espaço-temporal, inclusive `só locais novos`, que é do período de
-              treino); esses eventos aparecem só como localização no primeiro mapa.
+            - **Atividade de fogo** — pixels de fogo somados em células de 1°, cada evento na célula do seu
+              centro. A contagem de pixels de fogo é o alvo, então o mapa exclui **toda célula de avaliação de
+              qualquer protocolo** (o ano de teste do fold, o teste espacial e as três células do espaço-temporal,
+              inclusive `só locais novos`, que é do período de treino); esses eventos aparecem só como localização
+              no primeiro mapa. A localização tem incerteza de cerca de uma célula, e célula vazia não é
+              ausência de fogo: o WSTS é uma amostra de grandes incêndios, e a célula pode ser bloco de teste.
             - **Forçantes no espaço** — a média por evento de cada variável, que expõe o gradiente geográfico
               (elevação, secura, vento) por trás dos incêndios.
             """,

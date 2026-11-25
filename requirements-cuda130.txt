@@ -1,0 +1,4 @@
+# PyTorch com CUDA 13.0 (driver >= 580), para placas RTX 50xx (Blackwell, sm_120), que o build cu126 não suporta.
+# Instalar depois de `requirements.txt` (ou do lock), no lugar de `requirements-cuda.txt`. Mesma versão do torch.
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch==2.13.0+cu130

@@ -47,6 +47,7 @@ from scripts.core import (
     N_LANDCOVER_CLASSES,
     N_RAW_CHANNELS,
     PIXEL_SIZE_M,
+    RAW_CHANNELS,
     SOURCE_CRS,
     SPATIOTEMPORAL_FOLD,
     EventRef,
@@ -68,7 +69,7 @@ from scripts.core import (
     upslope_grid_from_elevation,
     valid_window_starts,
 )
-from scripts.env_report import provenance
+from scripts.env_report import git_state, provenance, sha256_text_normalized
 
 
 DEFAULT_REPORT = Path("reports/eda_summary.json")
@@ -78,6 +79,12 @@ DISTANCE_EDGES = (1.0, 2.0, 3.0, 5.0, 10.0)
 HISTOGRAM_BINS = 64
 # Canais cuja média por evento é plotada no mapa de variáveis (2x3 pequenos múltiplos).
 MAP_CHANNELS = ("elevation", "ndvi", "energy_release_component", "wind_speed", "specific_humidity", "temperature_max")
+FIRE_CELL_DEG = 1.0
+YEAR_LINESTYLES = ("-", "--", ":")
+YEAR_HATCHES = (None, "///", "...")
+# Canal com mais da metade da massa na primeira faixa (precipitação): em escala linear a cauda, onde está a quebra
+# do canal 17, fica colada no zero.
+HISTOGRAM_LOG_FIRST_BIN = 0.5
 BOOTSTRAP = 1000
 SMD_CAVEATS = {
     "ndvi": "contaminado pelo look-ahead do composto VNP13A1",
@@ -223,8 +230,9 @@ def event_inventory(event: EventRef, t_in: int = DEFAULT_T_IN) -> dict[str, Any]
 class EventAggregates:
     """Médias por evento dos canais do mapa e contagem de pixels de fogo.
 
-    A contagem de fogo é o alvo, então só é acumulada fora do ano de teste: no teste o evento entra
-    no mapa apenas como localização.
+    A contagem de fogo é o alvo, então só é acumulada nos eventos fora de qualquer célula de avaliação
+    (`with_target`); os demais entram no mapa apenas como localização. Os de validação do fold acumulam: a contagem
+    alimenta só uma figura descritiva, nunca uma decisão.
     """
 
     def __init__(self) -> None:
@@ -253,6 +261,49 @@ class EventAggregates:
                 entry[name] = row[name] / count if count else None
             result[key] = entry
         return result
+
+
+def fire_density_grid(rows: Sequence[dict[str, Any]], aggregates: dict[str, dict[str, Any]],
+                      cell_deg: float = FIRE_CELL_DEG) -> dict[str, Any]:
+    """Soma dos pixels de fogo por célula geográfica de `cell_deg` graus, cada evento atribuído pelo seu centro.
+
+    Só entram eventos com `fire_pixels` acumulado: os de avaliação chegam com `None` de `EventAggregates` e ficam
+    fora por construção, não por filtro aqui. A pegada (~118 × 94 km) tem o porte de uma célula de 1°, então a
+    localização tem incerteza de cerca de uma célula: o fogo de um evento perto da borda pode estar na vizinha.
+    """
+    rows = [r for r in rows if "lon" in r]
+    # Agregado ausente é falha da EDA, não evento de avaliação: contá-lo como excluído o esconderia na legenda.
+    missing = [r["key"] for r in rows if r["key"] not in aggregates]
+    if missing:
+        raise KeyError(f"eventos sem agregado: {missing[:5]}")
+    burning = [(r["lon"], r["lat"], aggregates[r["key"]]["fire_pixels"]) for r in rows
+               if aggregates[r["key"]]["fire_pixels"] is not None]
+    excluded = len(rows) - len(burning)
+    if not burning:
+        return {"lon_edges": [], "lat_edges": [], "sums": [], "events": 0, "excluded_events": excluded}
+    lons, lats, counts = (np.array(v, dtype=float) for v in zip(*burning))
+    lon_edges = np.arange(np.floor(lons.min() / cell_deg), np.floor(lons.max() / cell_deg) + 2) * cell_deg
+    lat_edges = np.arange(np.floor(lats.min() / cell_deg), np.floor(lats.max() / cell_deg) + 2) * cell_deg
+    sums, _, _ = np.histogram2d(lons, lats, bins=(lon_edges, lat_edges), weights=counts)
+    return {"lon_edges": lon_edges.tolist(), "lat_edges": lat_edges.tolist(), "sums": sums.T.tolist(),
+            "events": len(burning), "excluded_events": excluded}
+
+
+def year_styles(role_by_year: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Cor pelo papel no split (a convenção de todas as figuras) e traço/hachura pela ordem do ano dentro do papel.
+
+    Sem o segundo eixo, 2018 e 2020 — ambos de treino no fold 2 — saem idênticos, e justamente a quebra entre anos
+    some da figura.
+    """
+    styles: dict[str, dict[str, Any]] = {}
+    rank: dict[str, int] = {}
+    for year in sorted(role_by_year):
+        role = role_by_year[year]
+        index = rank.get(role, 0)
+        rank[role] = index + 1
+        styles[year] = {"role": role, "linestyle": YEAR_LINESTYLES[index % len(YEAR_LINESTYLES)],
+                        "hatch": YEAR_HATCHES[index % len(YEAR_HATCHES)]}
+    return styles
 
 
 class ChannelInventory:
@@ -1234,6 +1285,9 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
     errors: dict[str, str] = {}
     roles = summary["protocol"]["role_by_year"]
     colors = {"train": PALETTE["series"][0], "validation": PALETTE["series"][1], "test": PALETTE["series"][2]}
+    role_label = {"train": "treino", "validation": "validação", "test": "teste"}
+    styles = year_styles(roles)
+    units = {channel["name"]: channel["unit"] for channel in RAW_CHANNELS}
     label_style = {"fontsize": 8, "color": PALETTE["text_secondary"]}
 
     def inventory() -> Any:
@@ -1382,7 +1436,7 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
             ax.add_patch(Rectangle((west, south), east - west, north - south, transform=ccrs.PlateCarree(),
                                    facecolor=colors[role], edgecolor="none", alpha=0.35))
         handles = [plt.Line2D([], [], marker="s", linestyle="", color=colors[r],
-                              label=f"{r} ({sum(1 for x in rows if roles[str(x['year'])] == r)} eventos)")
+                              label=f"{role_label[r]} ({sum(1 for x in rows if roles[str(x['year'])] == r)} eventos)")
                    for r in ("train", "validation", "test") if any(roles[str(x["year"])] == r for x in rows)]
         ax.legend(handles=handles, fontsize=8, frameon=False, loc="lower left")
         ax.set_title("Pegada dos incêndios por papel no split", loc="left", fontsize=11, color=PALETTE["text"], pad=18)
@@ -1411,7 +1465,7 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
         "sealed": "selada",
         "dropped": "descartada (corredor)",
     }
-    group_label = {"train": "treino", "validation": "validação", "test": "teste"}
+    group_label = role_label
 
     def split_maps() -> Any:
         """Os dois protocolos lado a lado. A comparação é o argumento: à esquerda as cores se misturam."""
@@ -1595,28 +1649,27 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
         import cartopy.crs as ccrs
 
         rows = [r for r in summary["inventory"]["events"] if "lon" in r]
-        aggregates = summary.get("event_aggregates", {})
-        burning = [(r, aggregates.get(r["key"], {}).get("fire_pixels")) for r in rows]
-        burning = [(r, n) for r, n in burning if n]
-        if not burning:
+        grid = fire_density_grid(rows, summary.get("event_aggregates", {}))
+        sums = np.ma.masked_equal(np.array(grid["sums"], dtype=float), 0.0)
+        if not grid["events"] or sums.count() == 0:
             return None
         # Layout `constrained` (e não o `tight_layout` global): a barra de cor rouba espaço de um eixo de
         # aspecto travado, e só o motor restrito reconcilia os dois sem espremer o mapa a um canto.
         fig = plt.figure(figsize=(7.2, 5.15), layout="constrained")
         ax = _map_axes(fig, 111, _extent(rows))
-        counts = np.array([n for _, n in burning], dtype=float)
-        scatter = ax.scatter([r["lon"] for r, _ in burning], [r["lat"] for r, _ in burning],
-                             s=12 + 180 * counts / counts.max(), c=counts, cmap="YlOrRd",
-                             norm=__import__("matplotlib").colors.LogNorm(), alpha=0.75,
-                             edgecolors="#52514e", linewidths=0.3, transform=ccrs.PlateCarree())
-        bar = fig.colorbar(scatter, ax=ax, shrink=0.88, pad=0.02, aspect=28)
-        bar.set_label("pixels de fogo no evento (escala log)", fontsize=8, color=PALETTE["text_secondary"])
+        mesh = ax.pcolormesh(grid["lon_edges"], grid["lat_edges"], sums, cmap="YlOrRd",
+                             norm=matplotlib.colors.LogNorm(), alpha=0.85, edgecolors=PALETTE["surface"],
+                             linewidth=0.3, transform=ccrs.PlateCarree())
+        bar = fig.colorbar(mesh, ax=ax, shrink=0.88, pad=0.02, aspect=28)
+        bar.set_label(f"pixels de fogo por célula de {FIRE_CELL_DEG:g}° (escala log)", fontsize=8,
+                      color=PALETTE["text_secondary"])
         bar.ax.tick_params(labelsize=7, colors=PALETTE["text_secondary"])
-        ax.set_title("Atividade de fogo por evento", loc="left", fontsize=11, color=PALETTE["text"], pad=30)
+        ax.set_title("Densidade de atividade de fogo", loc="left", fontsize=11, color=PALETTE["text"], pad=30)
         ax.text(0, 1.02,
                 "\n".join(textwrap.wrap(
-                    "A contagem de fogo é o alvo, então o mapa exclui toda célula de avaliação de qualquer "
-                    "protocolo: o ano de teste, o teste espacial e as três células do espaço-temporal", 92)),
+                    f"{grid['events']} eventos, cada um na célula do seu centro. O fogo é o alvo: ficam fora os "
+                    f"{grid['excluded_events']} de avaliação em algum protocolo (teste temporal, espacial e "
+                    "espaço-temporal)", 92)),
                 transform=ax.transAxes, va="bottom", **label_style)
         return fig
 
@@ -1641,8 +1694,10 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
                                      transform=ccrs.PlateCarree())
                 bar = fig.colorbar(scatter, ax=ax, shrink=0.75, pad=0.02)
                 bar.ax.tick_params(labelsize=6, colors=PALETTE["text_secondary"])
-            ax.set_title(name, loc="left", fontsize=9, color=PALETTE["text"])
-        fig.suptitle("Média por evento das forçantes, no espaço", x=0.01, ha="left", fontsize=11, color=PALETTE["text"])
+            short = "ERC" if name == "energy_release_component" else name
+            ax.set_title(f"{short} [{units[name]}]", loc="left", fontsize=9, color=PALETTE["text"])
+        fig.suptitle("Média por evento das forçantes, no espaço (todos os anos; nenhum canal é o alvo)",
+                     x=0.01, ha="left", fontsize=11, color=PALETTE["text"])
         return fig
 
     def channel_histograms() -> Any:
@@ -1656,17 +1711,32 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
         rows_n = int(np.ceil(len(available) / columns))
         fig, axes = plt.subplots(rows_n, columns, figsize=(10.5, 2.0 * rows_n))
         for ax, name in zip(axes.ravel(), available):
-            for year in years:
-                entry = summary["channels_by_year"][year].get(name, {})
-                counts = entry.get("histogram_counts")
-                if not counts:
-                    continue
+            entries = {year: summary["channels_by_year"][year].get(name, {}) for year in years}
+            entries = {year: e for year, e in entries.items() if e.get("histogram_counts")}
+            shares = {year: np.array(e["histogram_counts"]) / max(sum(e["histogram_counts"]), 1)
+                      for year, e in entries.items()}
+            log_scale = any(share[0] > HISTOGRAM_LOG_FIRST_BIN for share in shares.values())
+            # `ChannelInventory` corta na faixa física antes de contar: o que passou dela está na faixa da borda.
+            clipped = [year for year, e in entries.items() if e.get("out_of_range")]
+            for year, entry in entries.items():
                 low, high = entry["physical_range"]
-                edges = np.linspace(low, high, len(counts) + 1)
-                total = max(sum(counts), 1)
-                ax.plot(edges[:-1], np.array(counts) / total, linewidth=1.2,
-                        color=colors[roles[year]], alpha=0.85, label=year)
-            ax.set_title(name, fontsize=8, loc="left", color=PALETTE["text"])
+                share = shares[year]
+                edges = np.linspace(low, high, len(share) + 1)
+                # Só no eixo log a faixa vazia vira lacuna; no linear ela é um traço legítimo no zero.
+                values = np.where(share > 0, share, np.nan) if log_scale else share
+                ax.plot((edges[:-1] + edges[1:]) / 2, values, linewidth=1.2,
+                        color=colors[roles[year]], linestyle=styles[year]["linestyle"], alpha=0.85,
+                        label=f"{year} ({role_label[roles[year]]})")
+            if log_scale:
+                ax.set_yscale("log")
+            notes = (["eixo y log"] if log_scale else []) + (
+                [f"{', '.join(clipped)} cortado na borda"] if clipped else [])
+            ax.set_title(f"{name}{chr(10) + '(' + '; '.join(notes) + ')' if notes else ''}", fontsize=8, loc="left",
+                         color=PALETTE["text"])
+            # A unidade completa (convenção angular, quebra do canal 17) está em `RAW_CHANNELS`; no painel, só a
+            # grandeza.
+            unit = units[name] if len(units[name]) <= 20 else units[name].split()[0]
+            ax.set_xlabel(unit, fontsize=6, color=PALETTE["text_secondary"], labelpad=1)
             ax.tick_params(labelsize=6, colors=PALETTE["text_secondary"])
             ax.set_facecolor(PALETTE["surface"])
             for side in ("top", "right"):
@@ -1674,8 +1744,10 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
         for ax in axes.ravel()[len(available):]:
             ax.set_visible(False)
         axes.ravel()[0].legend(fontsize=6, frameon=False)
-        fig.suptitle("Distribuição de cada canal por ano (densidade)", x=0.01, ha="left",
-                     fontsize=11, color=PALETTE["text"])
+        held = [year for year in years if roles[year] == "test"]
+        fig.suptitle("Fração dos pixels por faixa de valor, por canal e ano"
+                     + (f" (o ano de teste {', '.join(held)} não entra)" if held else ""),
+                     x=0.01, ha="left", fontsize=11, color=PALETTE["text"])
         return fig
 
     def seasonality() -> Any:
@@ -1689,15 +1761,18 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
         for year in years:
             counts = np.array([sum(1 for r in rows if str(r["year"]) == year and r["first_month"] == m)
                                for m in months], dtype=float)
-            ax.bar(months, counts, bottom=bottom, color=colors[roles[year]], edgecolor=PALETTE["surface"],
-                   linewidth=0.8, label=f"{year} ({roles[year]})")
+            # A hachura sai na cor da borda (a da superfície): listras claras sobre a cor do papel.
+            ax.bar(months, counts, bottom=bottom, color=colors[roles[year]],
+                   edgecolor=PALETTE["surface"], hatch=styles[year]["hatch"], linewidth=0.8,
+                   label=f"{year} ({role_label[roles[year]]})")
             bottom += counts
         ax.set_xticks(months)
         ax.set_xlabel("mês do primeiro dia do evento", **label_style)
         ax.set_ylabel("eventos", **label_style)
         ax.legend(fontsize=7.5, frameon=False)
         ax.grid(axis="y", color=PALETTE["grid"], linewidth=0.6)
-        _style(ax, "Sazonalidade dos incêndios", "Empilhado por ano; a cor indica o papel no split")
+        _style(ax, "Sazonalidade dos incêndios",
+               "Empilhado por ano; a cor indica o papel no split e a hachura separa anos do mesmo papel")
         return fig
 
     def event_sizes() -> Any:
@@ -1712,7 +1787,7 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
         ):
             data = [[(r["height"] * r["width"] / 1000 if key is None else r[key])
                      for r in rows if str(r["year"]) == year] for year in years]
-            parts = ax.boxplot(data, labels=years, patch_artist=True, widths=0.6,
+            parts = ax.boxplot(data, tick_labels=years, patch_artist=True, widths=0.6,
                                medianprops={"color": PALETTE["text"], "linewidth": 1.2},
                                flierprops={"marker": ".", "markersize": 3, "alpha": 0.4})
             for patch, year in zip(parts["boxes"], years):
@@ -1720,7 +1795,7 @@ def make_figures(summary: dict[str, Any], out_dir: Path) -> dict[str, Any]:
                 patch.set_alpha(0.7)
                 patch.set_edgecolor(PALETTE["text_secondary"])
             ax.set_ylabel(unit, **label_style)
-            _style(ax, title)
+            _style(ax, title, "caixa = quartis; bigodes até 1,5 IQR")
             ax.grid(axis="y", color=PALETTE["grid"], linewidth=0.6)
         return fig
 
@@ -1780,11 +1855,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--spatiotemporal-split", type=Path,
                         default=Path("config/splits/spatiotemporal_split.json"),
                         help="Definição versionada do split espaço-temporal, conferida do mesmo modo.")
+    parser.add_argument("--figures-only", action="store_true",
+                        help="Só redesenha as figuras a partir do `--report` existente, sem ler o HDF5; o resumo "
+                             "muda apenas em `figures`, `figure_errors` e `figures_provenance`.")
     return parser.parse_args(argv)
+
+
+def redraw_figures(report: Path, figures_dir: Path) -> dict[str, Any]:
+    """Redesenha as figuras a partir de um resumo gravado, sem ler o HDF5.
+
+    Só `figures`, `figure_errors` e `figures_provenance` mudam. A `provenance` continua sendo a da execução que
+    leu os dados, e `figures_provenance` diz qual código desenhou.
+    """
+    summary = json.loads(report.read_text(encoding="utf-8"))
+    figures = make_figures(summary, figures_dir)
+    summary["figures"] = {name: _relative(Path(path)) for name, path in figures["written"].items()}
+    summary["figure_errors"] = figures["errors"]
+    # A `provenance` do resumo é a do run que leu o HDF5; o código que desenhou pode ser outro.
+    summary["figures_provenance"] = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "repo": git_state(REPO_ROOT),
+        "eda_sha256_lf": sha256_text_normalized(Path(__file__)),
+    }
+    write_json(summary, report)
+    return summary
 
 
 def main(argv: list[str] | None = None) -> dict[str, Any]:
     args = parse_args(argv)
+    if args.figures_only:
+        summary = redraw_figures(args.report, args.figures)
+        print(f"Figuras: {len(summary['figures'])} | erros: {list(summary['figure_errors'])}")
+        return summary
     stats_path = args.data_root / "stats" / f"fold{args.fold}_train_normalization.json"
 
     def read_definition(path: Path) -> dict[str, Any] | None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,6 +53,41 @@ class ProtocolTests(unittest.TestCase):
         self.assertIn("histogram_counts", summary["channels_by_year"]["2019"]["ndvi"])
         self.assertEqual(summary["inventory"]["per_year"]["2021"]["images"], 8)
         self.assertEqual(sum(summary["active_fire_hour_histogram_utc_train"]), 0)
+        # O mapa de atividade de fogo lê `fire_pixels`: o evento de teste chega sem contagem, não com zero.
+        test_key = next(r["key"] for r in summary["inventory"]["events"] if r["year"] == 2021)
+        self.assertIsNone(summary["event_aggregates"][test_key]["fire_pixels"])
+        grid = eda.fire_density_grid(summary["inventory"]["events"], summary["event_aggregates"])
+        self.assertEqual(grid["excluded_events"], 1)
+        self.assertEqual(grid["events"], 3)
+
+
+class FigureHelperTests(unittest.TestCase):
+    def test_fire_density_grid_sums_by_center_cell_and_skips_held_out(self) -> None:
+        rows = [{"key": "a", "lon": -120.4, "lat": 38.2}, {"key": "b", "lon": -120.9, "lat": 38.7},
+                {"key": "c", "lon": -118.5, "lat": 38.5}, {"key": "d", "lon": -118.5, "lat": 38.5}]
+        aggregates = {"a": {"fire_pixels": 10}, "b": {"fire_pixels": 5}, "c": {"fire_pixels": 7},
+                      "d": {"fire_pixels": None}}
+        grid = eda.fire_density_grid(rows, aggregates, cell_deg=1.0)
+        sums = np.array(grid["sums"])
+        self.assertEqual(grid["lon_edges"], [-121.0, -120.0, -119.0, -118.0])
+        self.assertEqual(grid["lat_edges"], [38.0, 39.0])
+        self.assertEqual(sums.tolist(), [[15.0, 0.0, 7.0]])
+        self.assertEqual((grid["events"], grid["excluded_events"]), (3, 1))
+
+    def test_fire_density_grid_refuses_event_without_aggregate(self) -> None:
+        with self.assertRaises(KeyError):
+            eda.fire_density_grid([{"key": "a", "lon": 0.0, "lat": 0.0}], {})
+
+    def test_fire_density_grid_without_target_is_empty(self) -> None:
+        grid = eda.fire_density_grid([{"key": "a", "lon": 0.0, "lat": 0.0}], {"a": {"fire_pixels": None}})
+        self.assertEqual((grid["events"], grid["excluded_events"], grid["sums"]), (0, 1, []))
+
+    def test_years_of_the_same_role_get_distinct_strokes(self) -> None:
+        styles = eda.year_styles({"2018": "train", "2019": "validation", "2020": "train", "2021": "test"})
+        self.assertNotEqual(styles["2018"]["linestyle"], styles["2020"]["linestyle"])
+        self.assertNotEqual(styles["2018"]["hatch"], styles["2020"]["hatch"])
+        self.assertEqual(styles["2019"]["linestyle"], styles["2018"]["linestyle"])
+        self.assertEqual({s["role"] for s in styles.values()}, {"train", "validation", "test"})
 
 
 class FrontAccumulatorTests(unittest.TestCase):
@@ -191,8 +228,22 @@ class InventoryAndFigureTests(unittest.TestCase):
             summary, _, _ = eda.run_eda(root, 2)
             summary["official_statistics_comparison"] = None
             result = eda.make_figures(summary, root / "figs")
+            report = root / "summary.json"
+            eda.write_json(summary, report)
+            before = json.loads(report.read_text(encoding="utf-8"))
+            redrawn = eda.main(["--figures-only", "--report", str(report), "--figures", str(root / "figs2")])
         self.assertEqual(result["errors"], {})
         self.assertIn("wsts_inventario_por_ano", result["written"])
+        expected = ["wsts_histogramas_canais", "wsts_sazonalidade", "wsts_tamanho_eventos"]
+        if importlib.util.find_spec("cartopy") is not None:  # os mapas só existem com `cartopy`
+            expected += ["wsts_mapa_eventos", "wsts_mapa_atividade_fogo", "wsts_mapa_variaveis"]
+        for name in expected:
+            self.assertIn(name, result["written"])
+        self.assertEqual(redrawn["figure_errors"], {})
+        self.assertIn("eda_sha256_lf", redrawn["figures_provenance"])
+        self.assertEqual({k: v for k, v in redrawn.items() if not k.startswith("figure")},
+                         {k: v for k, v in before.items() if not k.startswith("figure")})
+        self.assertEqual(set(redrawn["figures"]), set(result["written"]))
 
 
 class NotebookBuilderTests(unittest.TestCase):
