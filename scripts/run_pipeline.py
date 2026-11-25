@@ -12,7 +12,7 @@ novo** depois de qualquer queda (energia, driver, reboot). O que já terminou é
 4. **Conversão** para HDF5 (`convert_hdf5.py`: retomável por evento). Pulada se os 607 eventos e o manifesto já
    existem. Com `--delete-zip`, o zip (~45 GiB) é apagado depois de uma conversão completa e conferida.
 5. **Treino** pelo executor que já existe, sem mudar nada do protocolo: `run_experiment.py` (experimentos do
-   catálogo, por exemplo `tin1_es`) ou `run_baseline.py` (receitas `paper_es` e `paper`). Um fold com relatório é
+   catálogo, por exemplo `tin1_es_rtx`) ou `run_baseline.py` (receitas `paper_es` e `paper`). Um fold com relatório é
    pulado, e um fold interrompido continua do `last.pt` da última época.
 6. **Pacote** `reports/entrega_<treino>_<data>.zip` com resumos, relatórios por fold, logs, livro-razão do teste e
    manifestos: é o que volta para quem analisa.
@@ -23,7 +23,7 @@ tentativas do executor. `--smoke` para depois dele; `--skip-smoke` o pula. `--ch
 
 Uso (da raiz do repositório):
 
-    python scripts/run_pipeline.py --train tin1_es --folds 3 4 5 7 8 9 10 11
+    python scripts/run_pipeline.py --train tin1_es_rtx
 """
 
 from __future__ import annotations
@@ -445,8 +445,9 @@ def _pid_alive(pid: int) -> bool:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Pipeline completo (download, conversão, treino), retomável: rode o mesmo comando de novo.")
-    parser.add_argument("--train", choices=TRAIN_CHOICES, default="tin1_es",
-                        help="tin1_es: experimento T_in = 1; paper_es / paper: baseline; none: só os dados.")
+    parser.add_argument("--train", choices=TRAIN_CHOICES, default="tin1_es_rtx",
+                        help="tin1_es_rtx (padrão): T_in = 1 do zero nos 12 folds; tin1_es: a rodada antiga; paper_es / paper: "
+                             "baseline; none: só os dados.")
     parser.add_argument("--folds", type=int, nargs="*", default=None,
                         help="Folds a treinar, na ordem dada (padrão: os 12, na ordem do executor).")
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT,

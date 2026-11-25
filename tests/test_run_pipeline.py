@@ -102,8 +102,15 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(command[command.index("--recipe") + 1], "paper_es")
         self.assertNotIn("--stall-minutes", command)
 
-    def test_default_folds_are_the_runner_order(self) -> None:
-        self.assertEqual(pipeline.parse_args([]).folds, list(baseline.FOLD_ORDER))
+    def test_default_is_the_fresh_12_fold_run(self) -> None:
+        args = pipeline.parse_args([])
+        self.assertEqual(args.train, "tin1_es_rtx")
+        self.assertEqual(args.folds, list(baseline.FOLD_ORDER))
+        names = pipeline.run_names(args.train, args.folds)
+        self.assertEqual(len(set(names)), 12)
+        self.assertTrue(all(name.startswith("tin1_es_rtx_f") for name in names))
+        self.assertEqual(pipeline.experiment.EXPERIMENTS["tin1_es_rtx"]["args"],
+                         pipeline.experiment.EXPERIMENTS["tin1_es"]["args"])
         with self.assertRaises(SystemExit):
             pipeline.parse_args(["--folds", "12"])
         with self.assertRaises(SystemExit):

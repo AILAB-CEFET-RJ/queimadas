@@ -39,8 +39,7 @@ python scripts/run_pipeline.py --check-only --data-root /dados/wildfirespreadts
 tmux new -s wsts
 source .venv/bin/activate
 systemd-inhibit --what=sleep:idle --why="treino WSTS" \
-  python scripts/run_pipeline.py --train tin1_es --folds 3 4 5 7 8 9 10 11 \
-  --data-root /dados/wildfirespreadts --delete-zip
+  python scripts/run_pipeline.py --train tin1_es_rtx --data-root /dados/wildfirespreadts --delete-zip
 # Ctrl-b d desanexa; tmux attach -t wsts volta
 ```
 
@@ -60,7 +59,7 @@ py -3.12 -m venv .venv
 pip install -r requirements-lock.txt
 pip install -r requirements-cuda130.txt
 python scripts\run_pipeline.py --check-only --data-root D:\dados\wildfirespreadts
-python scripts\run_pipeline.py --train tin1_es --folds 3 4 5 7 8 9 10 11 --data-root D:\dados\wildfirespreadts --delete-zip
+python scripts\run_pipeline.py --train tin1_es_rtx --data-root D:\dados\wildfirespreadts --delete-zip
 ```
 
 No Windows o executor pede ao sistema para não suspender enquanto roda. Deixe o computador na tomada.
@@ -76,13 +75,15 @@ No Windows o executor pede ao sistema para não suspender enquanto roda. Deixe o
    confere as contagens do Zenodo (607 eventos, 13.607 imagens).
 5. **Run curto de conferência** (~1 min): fold 2, 2 eventos por ano, 4 passos. Nunca avalia o teste. Se falhar, o
    pipeline para antes das horas de treino.
-6. **Treino** dos folds pedidos, um de cada vez: treina, escolhe o checkpoint na validação e avalia o teste uma
+6. **Treino** dos 12 folds, do zero, um de cada vez (`tin1_es_rtx`: `T_in = 1`, receita `paper_es`, runs
+   `tin1_es_rtx_f00` a `tin1_es_rtx_f11`): treina, escolhe o checkpoint na validação e avalia o teste uma
    única vez. Numa GPU de 6 GB cada fold levou de 2 a 17 h; numa RTX 5090 deve ser bem menos.
-7. **Pacote** `reports/entrega_tin1_es_<data>.zip`.
+7. **Pacote** `reports/entrega_tin1_es_rtx_<data>.zip`.
 
 ## Retomada
 
-Rode exatamente o mesmo comando. Nada é refeito à toa:
+O treino começa do zero nesta máquina: nenhum fold vem de outra rodada. A retomada abaixo vale só para quedas
+durante a própria execução. Rode exatamente o mesmo comando. Nada é refeito à toa:
 
 - o download continua do arquivo `.part` e confere o MD5 no fim;
 - a conversão pula os eventos que já têm HDF5 e sidecar conferidos;
@@ -99,7 +100,7 @@ o comando de novo.
 
 ## O que devolver
 
-No fim, o pipeline imprime o nome do pacote: `reports/entrega_tin1_es_<data>.zip`. Ele traz o resumo do
+No fim, o pipeline imprime o nome do pacote: `reports/entrega_tin1_es_rtx_<data>.zip`. Ele traz o resumo do
 experimento, o relatório JSON e o log de cada fold, o livro-razão do teste (`test_ledger.jsonl`), os manifestos dos
 dados e o registro do ambiente (GPU, versões). É só esse arquivo que precisa voltar para quem pediu o run. O log do
 próprio pipeline fica em `reports/logs/pipeline.log`.
@@ -112,13 +113,14 @@ Se algum fold ficar pendente, a última linha diz quais. Rode o comando de novo.
   livro-razão é o que garante isso.
 - **Não mude `--accumulate`** (padrão 2): os folds são comparados pareados com os de outras máquinas, com o mesmo
   lote efetivo.
-- O fold 7 do `tin1_es` roda com o nome `tin1_es_f07b`. É de propósito: o nome `tin1_es_f07` já foi usado.
+- **Não troque `tin1_es_rtx` por `tin1_es`**: o `tin1_es` é uma rodada anterior, feita em outra máquina. O
+  `tin1_es_rtx` refaz os 12 folds do zero, com nomes e resumo próprios, para que as duas nunca se misturem.
 
 ## Outras opções
 
 ```bash
 python scripts/run_pipeline.py --train none            # só baixa e converte os dados
 python scripts/run_pipeline.py --train paper_es        # baseline (receita paper_es) nos 12 folds
-python scripts/run_pipeline.py --train tin1_es --smoke # para depois do run curto de conferência
+python scripts/run_pipeline.py --smoke                  # para depois do run curto de conferência
 python scripts/run_pipeline.py --help
 ```

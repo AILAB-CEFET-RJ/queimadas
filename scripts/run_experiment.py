@@ -11,6 +11,7 @@ Experimentos:
   WSTS. Única mudança em relação ao `baseline_es_*`: `--t-in 1`, mais `--test-adjustment 5`, que faz o teste pular os
   4 primeiros dias de cada evento, como o `n_leading_observations_test_adjustment` do oficial, para que os alvos de
   teste sejam os mesmos do modelo de 5 dias.
+- `tin1_es_rtx` (2026-11-25): o `tin1_es` refeito do zero nos 12 folds numa RTX 5090, com nomes e resumo próprios.
 
 Proteções (2026-11-18, ver `gpu_guard.py`): treino e teste rodam com `--require-cuda` (sem cair na CPU em silêncio);
 antes de cada tentativa o executor confere `nvidia-smi` e o torch, e um watchdog encerra o fold se o log ficar
@@ -60,6 +61,20 @@ EXPERIMENTS: dict[str, dict[str, Any]] = {
         # determinismo). A avaliação foi anulada por decisão do Jota (entrada `annulment` no livro-razão, que é
         # append-only); pela regra do teste único o nome não pode ser retreinado, então o fold 7 roda como `f07b`.
         "run_name_overrides": {7: "tin1_es_f07b"},
+    },
+    # 2026-11-25: a mesma configuração, rodada do zero nos 12 folds numa RTX 5090 (máquina do orientador), em vez de
+    # completar a rodada do `tin1_es` (4 folds prontos) em outra máquina. Nomes, log e resumo próprios, para que as
+    # duas rodadas nunca se misturem numa média; a comparação com o baseline continua pareada por fold.
+    "tin1_es_rtx": {
+        "description": "tin1_es (paper_es, T_in = 1, ajuste de teste 5) refeito do zero nos 12 folds numa RTX 5090",
+        "script": "scripts/stconv_train.py",
+        "recipe": "paper_es",
+        "prefix": "tin1_es_rtx_f",
+        "args": ["--t-in", "1", "--test-adjustment", "5"],
+        "config": {"t_in": 1, "test_adjustment": 5},
+        "summary": REPORTS_DIR / "tin1_es_rtx_summary.json",
+        "runner_log": "tin1_es_rtx_runner.log",
+        "paired_with": "baseline_es_summary.json",
     },
 }
 
